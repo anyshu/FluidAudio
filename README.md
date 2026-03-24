@@ -26,9 +26,8 @@ Below are some featured local AI apps using Fluid Audio models on macOS and iOS:
   <a href="https://paraspeech.com"><img src="Documentation/assets/paraspeech.png" height="40" alt="Paraspeech"></a>
   <a href="https://altic.dev/fluid"><img src="Documentation/assets/fluidvoice.png" height="40" alt="Fluid Voice"></a>
   <a href="https://snaply.ai"><img src="Documentation/assets/snaply.png" height="40" alt="Snaply"></a>
-  <a href="https://hitoku.me/draft"><img src="Documentation/assets/hitokudraft.png" height="40" alt="Hitoku Draft"></a>
   <a href="https://github.com/yazinsai/OpenOats"><img src="Documentation/assets/openoats.png" height="40" alt="OpenOats"></a>
-  <!-- Add your app: submit logo via PR -->
+<!-- Add your app: submit logo via PR. The Fluid Inference team works to curate this and add new apps to the showcase section every couple of weeks. We appreciate your patience. -->
 </p>
 
 Want to convert your own model? Check [möbius](https://github.com/FluidInference/mobius)
@@ -91,6 +90,8 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Hitoku Draft](https://hitoku.me/draft)** | A local, private, voice writing assistant on your macOS menu bar. Uses Parakeet ASR. |
 | **[Audite](https://github.com/zachatrocity/audite)** | macOS menu-bar app that records meetings and transcribes them locally into Markdown notes for Obsidian. Uses Parakeet ASR via FluidAudio on the Apple Neural Engine. |
 | **[Muesli](https://github.com/pHequals7/muesli)** | Native macOS dictation and meeting transcription with ~0.13s latency. Captures microphone and system audio with automatic speaker diarization. Uses Parakeet TDT and Qwen3 ASR. |
+| **[NanoVoice](https://apps.apple.com/kz/app/nanovoice/id6760539688)** | Free iOS voice keyboard for fast, private dictation in any app. Uses Parakeet ASR. |
+| **[MiniWhisper](https://github.com/andyhtran/MiniWhisper)** | Open-source macOS menu bar for quick local voice-to-text with minimal setup. Pick a shortcut, start talking. Uses Parakeet ASR. |
 
 ## Installation
 
