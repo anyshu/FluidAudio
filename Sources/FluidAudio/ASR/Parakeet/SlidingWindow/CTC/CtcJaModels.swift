@@ -4,7 +4,7 @@ import Foundation
 /// Configuration for Japanese CTC models
 public enum CtcJaConfig: ParakeetLanguageModelConfig {
     public static let blankId: Int = 3072
-    public static let repository: Repo = .parakeetCtcJa
+    public static let repository: Repo = .parakeetJa
     public static let languageLabel: String = "CTC ja (Japanese)"
     public static let loggerCategory: String = "CtcJaModels"
 

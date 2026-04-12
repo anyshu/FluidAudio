@@ -2,9 +2,10 @@
 import Foundation
 
 /// Configuration for Japanese TDT models
+/// NOTE: Uses parakeetJa repo where TDT v2 models (Decoderv2, Jointerv2) are uploaded alongside CTC models
 public enum TdtJaConfig: ParakeetLanguageModelConfig {
     public static let blankId: Int = 3072
-    public static let repository: Repo = .parakeetTdtJa
+    public static let repository: Repo = .parakeetJa
     public static let languageLabel: String = "TDT ja (Japanese)"
     public static let loggerCategory: String = "TdtJaModels"
 
