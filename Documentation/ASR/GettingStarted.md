@@ -108,3 +108,15 @@ swift run fluidaudiocli parakeet-eou --benchmark --chunk-size 160 --max-files 10
 ```
 
 **Options:** `--input <path>`, `--benchmark`, `--max-files <n>`, `--chunk-size <160|320|1600>`, `--eou-debounce <ms>`, `--use-cache`, `--models <path>`, `--output <path>`, `--verbose`
+
+## macOS microphone demo app
+
+If you want a concrete `AVAudioEngine` integration example, open the demo app in
+`Examples/AudioClaw/AudioClaw.xcodeproj`.
+
+- SwiftUI UI
+- Live microphone capture
+- `SlidingWindowAsrManager` streaming updates
+- English v2 / multilingual v3 model picker
+
+See [Microphone Demo App](MicrophoneDemoApp.md) for the entry points.

@@ -230,6 +230,7 @@ swift run fluidaudiocli transcribe audio.wav
   - Automatic Speech Recognition/Transcription
     - [Getting Started](Documentation/ASR/GettingStarted.md)
     - [Last Chunk Handling](Documentation/ASR/LastChunkHandling.md)
+    - [Microphone Demo App](Documentation/ASR/MicrophoneDemoApp.md)
   - Speaker Diarization
     - [Speaker Diarization Guide](Documentation/Diarization/GettingStarted.md)
   - VAD: [Getting Started](Documentation/VAD/GettingStarted.md)

@@ -1,0 +1,287 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000112F7F000100000001 /* AudioClawApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000212F7F000100000001 /* AudioClawApp.swift */; };
+		A10000122F7F000100000001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000222F7F000100000001 /* ContentView.swift */; };
+		A10000132F7F000100000001 /* AsrViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000232F7F000100000001 /* AsrViewModel.swift */; };
+		A10000142F7F000100000001 /* AsrController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000242F7F000100000001 /* AsrController.swift */; };
+		A10000152F7F000100000001 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = A10000312F7F000100000001 /* FluidAudio */; };
+		A10000162F7F000100000001 /* TranscriptTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000252F7F000100000001 /* TranscriptTextView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A10000022F7F000100000001 /* AudioClaw.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AudioClaw.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000212F7F000100000001 /* AudioClawApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioClawApp.swift; sourceTree = "<group>"; };
+		A10000222F7F000100000001 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A10000232F7F000100000001 /* AsrViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsrViewModel.swift; sourceTree = "<group>"; };
+		A10000242F7F000100000001 /* AsrController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsrController.swift; sourceTree = "<group>"; };
+		A10000252F7F000100000001 /* TranscriptTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptTextView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A10000092F7F000100000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000152F7F000100000001 /* FluidAudio in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A10000032F7F000100000001 = {
+			isa = PBXGroup;
+			children = (
+				A10000042F7F000100000001 /* AudioClaw */,
+				A10000052F7F000100000001 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A10000042F7F000100000001 /* AudioClaw */ = {
+			isa = PBXGroup;
+			children = (
+				A10000212F7F000100000001 /* AudioClawApp.swift */,
+				A10000222F7F000100000001 /* ContentView.swift */,
+				A10000232F7F000100000001 /* AsrViewModel.swift */,
+				A10000242F7F000100000001 /* AsrController.swift */,
+				A10000252F7F000100000001 /* TranscriptTextView.swift */,
+			);
+			path = AudioClaw;
+			sourceTree = "<group>";
+		};
+		A10000052F7F000100000001 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A10000022F7F000100000001 /* AudioClaw.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A10000012F7F000100000001 /* AudioClaw */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A100001A2F7F000100000001 /* Build configuration list for PBXNativeTarget "AudioClaw" */;
+			buildPhases = (
+				A10000082F7F000100000001 /* Sources */,
+				A10000092F7F000100000001 /* Frameworks */,
+				A100000A2F7F000100000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+			);
+			name = AudioClaw;
+			packageProductDependencies = (
+				A10000312F7F000100000001 /* FluidAudio */,
+			);
+			productName = AudioClaw;
+			productReference = A10000022F7F000100000001 /* AudioClaw.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A10000062F7F000100000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1630;
+				LastUpgradeCheck = 1630;
+				TargetAttributes = {
+					A10000012F7F000100000001 = {
+						CreatedOnToolsVersion = 16.3;
+					};
+				};
+			};
+			buildConfigurationList = A10000172F7F000100000001 /* Build configuration list for PBXProject "AudioClaw" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A10000032F7F000100000001;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A10000302F7F000100000001 /* XCLocalSwiftPackageReference "../.." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = A10000052F7F000100000001 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A10000012F7F000100000001 /* AudioClaw */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A100000A2F7F000100000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A10000082F7F000100000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000122F7F000100000001 /* ContentView.swift in Sources */,
+				A10000142F7F000100000001 /* AsrController.swift in Sources */,
+				A10000162F7F000100000001 /* TranscriptTextView.swift in Sources */,
+				A10000112F7F000100000001 /* AudioClawApp.swift in Sources */,
+				A10000132F7F000100000001 /* AsrViewModel.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A10000182F7F000100000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A10000192F7F000100000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		A100001B2F7F000100000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = AudioClaw;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "AudioClaw transcribes speech from your microphone with FluidAudio.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.fluidinference.AudioClaw;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A100001C2F7F000100000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = AudioClaw;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "AudioClaw transcribes speech from your microphone with FluidAudio.";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.fluidinference.AudioClaw;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ENABLE_EXPLICIT_MODULES = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A10000172F7F000100000001 /* Build configuration list for PBXProject "AudioClaw" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000182F7F000100000001 /* Debug */,
+				A10000192F7F000100000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A100001A2F7F000100000001 /* Build configuration list for PBXNativeTarget "AudioClaw" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A100001B2F7F000100000001 /* Debug */,
+				A100001C2F7F000100000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A10000302F7F000100000001 /* XCLocalSwiftPackageReference "../.." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A10000312F7F000100000001 /* FluidAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000302F7F000100000001 /* XCLocalSwiftPackageReference "../.." */;
+			productName = FluidAudio;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A10000062F7F000100000001 /* Project object */;
+}

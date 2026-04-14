@@ -17,6 +17,7 @@
 - [Post-Processing (ITN)](ASR/PostProcessing.md)
 - [Last Chunk Handling](ASR/LastChunkHandling.md)
 - [Manual Model Loading](ASR/ManualModelLoading.md)
+- [Microphone Demo App](ASR/MicrophoneDemoApp.md)
 - [Directory Structure](ASR/DirectoryStructure.md)
 - [Parakeet Benchmarks](ASR/benchmarks100.md)
 
