@@ -13,6 +13,7 @@
 		A10000142F7F000100000001 /* AsrController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000242F7F000100000001 /* AsrController.swift */; };
 		A10000152F7F000100000001 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = A10000312F7F000100000001 /* FluidAudio */; };
 		A10000162F7F000100000001 /* TranscriptTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000252F7F000100000001 /* TranscriptTextView.swift */; };
+		A10000502F7F000100000001 /* DiarizationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000512F7F000100000001 /* DiarizationController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -22,6 +23,7 @@
 		A10000232F7F000100000001 /* AsrViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsrViewModel.swift; sourceTree = "<group>"; };
 		A10000242F7F000100000001 /* AsrController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsrController.swift; sourceTree = "<group>"; };
 		A10000252F7F000100000001 /* TranscriptTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptTextView.swift; sourceTree = "<group>"; };
+		A10000512F7F000100000001 /* DiarizationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiarizationController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -52,6 +54,7 @@
 				A10000232F7F000100000001 /* AsrViewModel.swift */,
 				A10000242F7F000100000001 /* AsrController.swift */,
 				A10000252F7F000100000001 /* TranscriptTextView.swift */,
+				A10000512F7F000100000001 /* DiarizationController.swift */,
 			);
 			path = AudioClaw;
 			sourceTree = "<group>";
@@ -146,6 +149,7 @@
 				A10000162F7F000100000001 /* TranscriptTextView.swift in Sources */,
 				A10000112F7F000100000001 /* AudioClawApp.swift in Sources */,
 				A10000132F7F000100000001 /* AsrViewModel.swift in Sources */,
+				A10000502F7F000100000001 /* DiarizationController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

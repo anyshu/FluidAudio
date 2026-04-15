@@ -1,3 +1,4 @@
+import FluidAudio
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -33,9 +34,7 @@ struct ContentView: View {
             allowsMultipleSelection: false
         ) { result in
             guard case .success(let urls) = result, let url = urls.first else { return }
-            Task {
-                await viewModel.transcribeFile(url: url)
-            }
+            viewModel.selectFile(url: url)
         }
     }
 
@@ -62,6 +61,20 @@ struct ContentView: View {
                 .disabled(viewModel.isBusy || viewModel.isRecording)
 
                 Toggle("VAD", isOn: $viewModel.vadEnabled)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .disabled(
+                        viewModel.isBusy
+                            || viewModel.isRecording
+                            || viewModel.pendingFileURL != nil
+                    )
+                    .help(
+                        viewModel.pendingFileURL != nil
+                            ? "VAD is unnecessary in file mode — sliding-window ASR already handles segmentation."
+                            : "Voice Activity Detection (live recording only)."
+                    )
+
+                Toggle("Diarize", isOn: $viewModel.diarizationEnabled)
                     .toggleStyle(.switch)
                     .controlSize(.small)
                     .disabled(viewModel.isBusy || viewModel.isRecording)
@@ -95,10 +108,24 @@ struct ContentView: View {
                 Button {
                     viewModel.isShowingFilePicker = true
                 } label: {
-                    Label("Transcribe File...", systemImage: "doc.fill")
+                    Label("Choose File...", systemImage: "doc.fill")
                 }
                 .buttonStyle(.bordered)
                 .disabled(viewModel.isBusy || viewModel.isRecording)
+                .controlSize(.regular)
+
+                Button {
+                    Task { await viewModel.runPendingFile() }
+                } label: {
+                    Label("Run", systemImage: "play.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.purple)
+                .disabled(
+                    viewModel.isBusy
+                        || viewModel.isRecording
+                        || viewModel.pendingFileURL == nil
+                )
                 .controlSize(.regular)
 
                 Button("Clear") {
@@ -119,9 +146,112 @@ struct ContentView: View {
                 .disabled(viewModel.isBusy)
                 .controlSize(.small)
             }
+
+            if let url = viewModel.pendingFileURL {
+                pendingFileRow(url: url)
+            }
+
+            if viewModel.diarizationEnabled {
+                diarizationOptionsRow
+                if viewModel.selectedDiarizationEngine == .sortformer {
+                    sortformerThresholdRow
+                }
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    private func pendingFileRow(url: URL) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "doc.fill")
+                .font(.caption)
+                .foregroundStyle(.purple)
+            Text(url.lastPathComponent)
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer()
+            Button {
+                viewModel.clearPendingFile()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.borderless)
+            .disabled(viewModel.isBusy)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Color.purple.opacity(0.06), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+
+    private var sortformerThresholdRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "slider.horizontal.3")
+                .font(.caption)
+                .foregroundStyle(.purple)
+            Text("Speaker change sensitivity")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            Slider(
+                value: $viewModel.sortformerPredScoreThreshold,
+                in: 0.10...0.40,
+                step: 0.01
+            )
+            .frame(maxWidth: 220)
+            .disabled(viewModel.isBusy || viewModel.isRecording)
+            Text(String(format: "%.2f", viewModel.sortformerPredScoreThreshold))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 36, alignment: .trailing)
+            Text("(lower = more sensitive)")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            Spacer()
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var diarizationOptionsRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "person.2.wave.2.fill")
+                .font(.caption)
+                .foregroundStyle(.purple)
+            Text("Engine")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            Picker("Engine", selection: $viewModel.selectedDiarizationEngine) {
+                ForEach(DiarizationEngineType.allCases) { engine in
+                    Text(engine.rawValue).tag(engine)
+                }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .disabled(viewModel.isBusy || viewModel.isRecording)
+
+            if viewModel.selectedDiarizationEngine == .lseend {
+                Text("Variant")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Picker("Variant", selection: $viewModel.selectedLSEENDVariant) {
+                    ForEach(LSEENDVariant.allCases) { variant in
+                        Text(variant.rawValue).tag(variant)
+                    }
+                }
+                .frame(maxWidth: 160)
+                .disabled(viewModel.isBusy || viewModel.isRecording)
+            }
+
+            Text(viewModel.selectedDiarizationEngine.detail)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+
+            Spacer()
+        }
+        .padding(.vertical, 4)
     }
 
     // MARK: - Progress Bars
@@ -203,6 +333,8 @@ struct ContentView: View {
                         .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if viewModel.diarizationEnabled, !viewModel.diarizedSegments.isEmpty {
+                diarizedTranscriptView
             } else {
                 TranscriptTextView(text: viewModel.displayedTranscript)
                     .padding(.horizontal, 16)
@@ -211,6 +343,50 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var diarizedTranscriptView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(viewModel.diarizedSegments) { segment in
+                    HStack(alignment: .top, spacing: 10) {
+                        Circle()
+                            .fill(Self.speakerColor(for: segment.speakerIndex))
+                            .frame(width: 10, height: 10)
+                            .padding(.top, 6)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text(segment.speakerLabel)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(Self.speakerColor(for: segment.speakerIndex))
+                                Text(String(format: "%.1fs – %.1fs", segment.startTime, segment.endTime))
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(.tertiary)
+                            }
+                            Text(segment.text)
+                                .font(.callout)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        Self.speakerColor(for: segment.speakerIndex).opacity(0.06),
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    )
+                }
+            }
+            .padding(16)
+        }
+    }
+
+    private static let speakerPalette: [Color] = [
+        .blue, .orange, .green, .pink, .purple, .teal, .yellow, .red, .indigo, .mint,
+    ]
+
+    static func speakerColor(for index: Int) -> Color {
+        speakerPalette[index % speakerPalette.count]
     }
 
     // MARK: - Sidebar
@@ -281,6 +457,39 @@ struct ContentView: View {
                                 Text(viewModel.lastPartialText)
                                     .font(.caption)
                                     .lineLimit(3)
+                            }
+                        }
+                    }
+                }
+
+                if viewModel.diarizationEnabled {
+                    Divider().padding(.horizontal, 12)
+                    sidebarSection("Speakers", icon: "person.2.wave.2.fill") {
+                        if viewModel.diarizedSegments.isEmpty {
+                            Text("Engine: \(viewModel.selectedDiarizationEngine.rawValue)")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                            Text("Speaker labels appear after the first utterance.")
+                                .font(.caption2)
+                                .foregroundStyle(.quaternary)
+                        } else {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("\(viewModel.uniqueSpeakerCount) speaker(s) detected")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                ForEach(speakerStats(), id: \.index) { stat in
+                                    HStack(spacing: 6) {
+                                        Circle()
+                                            .fill(Self.speakerColor(for: stat.index))
+                                            .frame(width: 8, height: 8)
+                                        Text("Speaker \(stat.index + 1)")
+                                            .font(.caption)
+                                        Spacer()
+                                        Text("\(stat.count) seg")
+                                            .font(.caption2.monospacedDigit())
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                }
                             }
                         }
                     }
@@ -374,6 +583,22 @@ struct ContentView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(tint.opacity(0.1), in: Capsule())
+    }
+
+    private struct SpeakerStat {
+        let index: Int
+        let count: Int
+    }
+
+    private func speakerStats() -> [SpeakerStat] {
+        var counts: [Int: Int] = [:]
+        for seg in viewModel.diarizedSegments {
+            counts[seg.speakerIndex, default: 0] += 1
+        }
+        return
+            counts
+            .sorted { $0.key < $1.key }
+            .map { SpeakerStat(index: $0.key, count: $0.value) }
     }
 
     private func phaseColor(_ phase: RecentTranscriptUpdate.Phase) -> Color {

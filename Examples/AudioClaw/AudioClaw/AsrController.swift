@@ -172,6 +172,11 @@ actor FixedIntervalBuffer {
     }
 }
 
+private struct PendingUtterance {
+    let samples: [Float]
+    let approxEndSamples: Int
+}
+
 @MainActor
 final class AsrController {
     private let audioEngine = AVAudioEngine()
@@ -189,9 +194,14 @@ final class AsrController {
     private var fixedBuffer: FixedIntervalBuffer?
     private var transcriptionTask: Task<Void, Never>?
     private var fileTranscriptionTask: Task<Void, Never>?
-    private var pendingUtterance: [Float]?
+    private var pendingUtterance: PendingUtterance?
     private var isTranscribingUtterance = false
     private var committedTranscriptSegments: [String] = []
+
+    /// Set by the view model before calling start()/transcribeFile() if diarization is enabled.
+    var diarizationController: DiarizationController?
+    /// Callback fired with a speaker-labeled segment after each confirmed transcription. Set by view model.
+    private var diarizedSegmentCallback: (@Sendable (DiarizedTranscriptSegment) -> Void)?
 
     func availableInputDevices() -> [AudioInputDevice] {
         AVCaptureDevice.DiscoverySession(
@@ -249,8 +259,13 @@ final class AsrController {
         progressHandler: @escaping DownloadUtils.ProgressHandler,
         onAudioLevel: @escaping @Sendable (Float) -> Void,
         onVadStateChanged: @escaping @Sendable (Bool, Float) -> Void,
-        onVadEvent: @escaping @Sendable (VadDebugEvent) -> Void
+        onVadEvent: @escaping @Sendable (VadDebugEvent) -> Void,
+        onDiarizedSegment: (@Sendable (DiarizedTranscriptSegment) -> Void)? = nil
     ) async throws -> AsyncStream<SlidingWindowTranscriptionUpdate> {
+        self.diarizedSegmentCallback = onDiarizedSegment
+        if let dc = diarizationController {
+            await dc.reset()
+        }
         try await ensureModelsLoaded(
             modelVersion: modelVersion,
             needsVad: vadEnabled,
@@ -300,10 +315,12 @@ final class AsrController {
         stopAudioEngine()
 
         if let trailingUtterance = await gate?.finish() {
-            try await transcribeUtteranceAndPublish(trailingUtterance)
+            let endSamples = await capturedAudioStore.sampleCount
+            try await transcribeUtteranceAndPublish(trailingUtterance, approxEndSamples: endSamples)
         }
         if let trailingChunk = await fixedBuffer?.finish() {
-            try await transcribeUtteranceAndPublish(trailingChunk)
+            let endSamples = await capturedAudioStore.sampleCount
+            try await transcribeUtteranceAndPublish(trailingChunk, approxEndSamples: endSamples)
         }
         gate = nil
         fixedBuffer = nil
@@ -315,6 +332,7 @@ final class AsrController {
 
         updatesContinuation?.finish()
         updatesContinuation = nil
+        diarizedSegmentCallback = nil
         return committedTranscriptSegments.joined(separator: " ")
     }
 
@@ -327,8 +345,10 @@ final class AsrController {
         modelVersion: AsrModelVersion,
         vadEnabled: Bool,
         modelProgressHandler: @escaping DownloadUtils.ProgressHandler,
-        onProgress: @escaping @Sendable (Double) -> Void
+        onProgress: @escaping @Sendable (Double) -> Void,
+        onDiarizedSegment: (@Sendable (DiarizedTranscriptSegment) -> Void)? = nil
     ) async throws -> AsyncStream<SlidingWindowTranscriptionUpdate> {
+        self.diarizedSegmentCallback = onDiarizedSegment
         try await ensureModelsLoaded(
             modelVersion: modelVersion,
             needsVad: vadEnabled,
@@ -377,17 +397,33 @@ final class AsrController {
         let capturedModelVersion = activeModelVersion
         let capturedAsrManager = self.asrManager
         let capturedCtcZhCnManager = self.ctcZhCnManager
+        let capturedDiarController = self.diarizationController
+        let capturedDiarCallback = self.diarizedSegmentCallback
 
         fileTranscriptionTask?.cancel()
         fileTranscriptionTask = Task { [weak self] in
             guard let self else { return }
 
             let totalSamples = samples.count
-            var utterances: [[Float]] = []
+            // Each utterance carries its sample range so we can map it to a speaker later.
+            var utterances: [(samples: [Float], startSample: Int, endSample: Int)] = []
+
+            // Kick off diarization in parallel with VAD/segmentation if enabled.
+            let diarTask: Task<[SpeakerTimeRange], Error>?
+            if capturedDiarCallback != nil, let dc = capturedDiarController {
+                let captureURL = url
+                diarTask = Task.detached(priority: .userInitiated) {
+                    try await dc.processFileToSegments(captureURL)
+                }
+            } else {
+                diarTask = nil
+            }
 
             if let fileGate {
                 let processingChunkSize = 8_192
                 var processedCount = 0
+                // Track running consumed samples to assign approximate positions per utterance
+                var consumedByUtterances = 0
 
                 // VAD phase: report 0% – 50%
                 while processedCount < totalSamples, !Task.isCancelled {
@@ -396,13 +432,19 @@ final class AsrController {
                     processedCount = end
 
                     if let result = try? await fileGate.append(samples: chunk) {
-                        utterances.append(contentsOf: result.finalizedUtterances)
+                        for utterance in result.finalizedUtterances {
+                            let start = consumedByUtterances
+                            let endSample = start + utterance.count
+                            utterances.append((utterance, start, endSample))
+                            consumedByUtterances = endSample
+                        }
                     }
                     onProgress(Double(processedCount) / Double(totalSamples) * 0.5)
                 }
 
                 if !Task.isCancelled, let trailing = await fileGate.finish() {
-                    utterances.append(trailing)
+                    let start = consumedByUtterances
+                    utterances.append((trailing, start, start + trailing.count))
                 }
             } else {
                 // No VAD: split into fixed 15s chunks
@@ -410,19 +452,25 @@ final class AsrController {
                 var idx = 0
                 while idx < totalSamples, !Task.isCancelled {
                     let end = min(idx + chunkSamples, totalSamples)
-                    utterances.append(Array(samples[idx..<end]))
+                    utterances.append((Array(samples[idx..<end]), idx, end))
                     idx = end
                 }
                 onProgress(0.5)
             }
 
+            // Wait for diarization to complete before ASR phase (so we can map speakers).
+            var speakerSegments: [SpeakerTimeRange] = []
+            if let diarTask {
+                speakerSegments = (try? await diarTask.value) ?? []
+            }
+
             // Transcription phase: report 50% – 100%
             let totalUtterances = utterances.count
-            for (i, utterance) in utterances.enumerated() {
+            for (i, item) in utterances.enumerated() {
                 guard !Task.isCancelled else { break }
 
                 if let text = try? await Self.transcribeUtterance(
-                    samples: utterance,
+                    samples: item.samples,
                     modelVersion: capturedModelVersion,
                     asrManager: capturedAsrManager,
                     ctcZhCnManager: capturedCtcZhCnManager
@@ -440,6 +488,23 @@ final class AsrController {
                                 )
                             )
                         }
+
+                        if let callback = capturedDiarCallback, !speakerSegments.isEmpty {
+                            let startTime = Float(item.startSample) / 16_000.0
+                            let endTime = Float(item.endSample) / 16_000.0
+                            let speakerIndex = SpeakerLookup.dominantSpeaker(
+                                from: speakerSegments,
+                                in: startTime...endTime
+                            )
+                            callback(
+                                DiarizedTranscriptSegment(
+                                    speakerIndex: speakerIndex,
+                                    text: trimmed,
+                                    startTime: startTime,
+                                    endTime: endTime
+                                )
+                            )
+                        }
                     }
                 }
                 onProgress(0.5 + Double(i + 1) / Double(max(1, totalUtterances)) * 0.5)
@@ -448,6 +513,7 @@ final class AsrController {
             await MainActor.run {
                 self.updatesContinuation?.finish()
                 self.updatesContinuation = nil
+                self.diarizedSegmentCallback = nil
             }
         }
 
@@ -479,6 +545,7 @@ final class AsrController {
         let audioProcessingQueue = self.audioProcessingQueue
         let gate = self.gate
         let fixedBuffer = self.fixedBuffer
+        let diarController = self.diarizationController
 
         inputNode.installTap(onBus: 0, bufferSize: 4_096, format: inputFormat) { buffer, _ in
             guard let copiedBuffer = buffer.deepCopy() else { return }
@@ -492,6 +559,10 @@ final class AsrController {
 
                 Task {
                     await capturedAudioStore.append(resampled)
+                    if let dc = diarController {
+                        await dc.feedAudio(resampled)
+                    }
+                    let currentTotal = await capturedAudioStore.sampleCount
 
                     if let gate {
                         guard let gateResult = try? await gate.append(samples: resampled) else { return }
@@ -502,13 +573,19 @@ final class AsrController {
 
                         for utterance in gateResult.finalizedUtterances {
                             guard let self else { return }
-                            try? await self.transcribeUtteranceAndPublish(utterance)
+                            try? await self.transcribeUtteranceAndPublish(
+                                utterance,
+                                approxEndSamples: currentTotal
+                            )
                         }
                     } else if let fixedBuffer {
                         let chunks = await fixedBuffer.append(resampled)
                         for chunk in chunks {
                             guard let self else { return }
-                            try? await self.transcribeUtteranceAndPublish(chunk)
+                            try? await self.transcribeUtteranceAndPublish(
+                                chunk,
+                                approxEndSamples: currentTotal
+                            )
                         }
                     }
                 }
@@ -525,41 +602,67 @@ final class AsrController {
         audioEngine.reset()
     }
 
-    private func transcribeUtteranceAndPublish(_ samples: [Float]) async throws {
+    private func transcribeUtteranceAndPublish(
+        _ samples: [Float],
+        approxEndSamples: Int
+    ) async throws {
         guard samples.count >= 4_000 else { return }
         if isTranscribingUtterance {
             // Keep only the latest fallback/VAD segment so ASR backlog cannot starve audio capture.
-            pendingUtterance = samples
+            pendingUtterance = PendingUtterance(samples: samples, approxEndSamples: approxEndSamples)
             return
         }
 
         isTranscribingUtterance = true
         pendingUtterance = nil
-        scheduleTranscriptionLoop(initialSamples: samples)
+        scheduleTranscriptionLoop(
+            initialSamples: samples,
+            initialApproxEndSamples: approxEndSamples
+        )
     }
 
-    private func scheduleTranscriptionLoop(initialSamples: [Float]) {
+    private func scheduleTranscriptionLoop(
+        initialSamples: [Float],
+        initialApproxEndSamples: Int
+    ) {
         let modelVersion = activeModelVersion
         let asrManager = self.asrManager
         let ctcZhCnManager = self.ctcZhCnManager
         let continuation = updatesContinuation
+        let diarController = self.diarizationController
+        let diarCallback = self.diarizedSegmentCallback
 
         transcriptionTask = Task<Void, Never> { [weak self] in
             guard let self else { return }
 
-            var currentSamples: [Float]? = initialSamples
+            var current: PendingUtterance? = PendingUtterance(
+                samples: initialSamples,
+                approxEndSamples: initialApproxEndSamples
+            )
 
-            while !Task.isCancelled, let samples = currentSamples {
-                if
-                    let text = try? await Self.transcribeUtterance(
-                        samples: samples,
-                        modelVersion: modelVersion,
-                        asrManager: asrManager,
-                        ctcZhCnManager: ctcZhCnManager
-                    )
-                {
+            while !Task.isCancelled, let pending = current {
+                if let text = try? await Self.transcribeUtterance(
+                    samples: pending.samples,
+                    modelVersion: modelVersion,
+                    asrManager: asrManager,
+                    ctcZhCnManager: ctcZhCnManager
+                ) {
                     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !trimmed.isEmpty {
+                        // Speaker lookup (best effort) — query diarizer timeline before publishing
+                        var diarizedSegment: DiarizedTranscriptSegment?
+                        if let dc = diarController, diarCallback != nil {
+                            let endTime = Float(pending.approxEndSamples) / 16_000.0
+                            let startTime = max(0, endTime - Float(pending.samples.count) / 16_000.0)
+                            let speakerIndex = await dc.dominantSpeakerIndex(from: startTime, to: endTime)
+                            diarizedSegment = DiarizedTranscriptSegment(
+                                speakerIndex: speakerIndex,
+                                text: trimmed,
+                                startTime: startTime,
+                                endTime: endTime
+                            )
+                        }
+
                         await MainActor.run {
                             self.committedTranscriptSegments.append(trimmed)
                             continuation?.yield(
@@ -571,10 +674,13 @@ final class AsrController {
                                 )
                             )
                         }
+                        if let segment = diarizedSegment {
+                            diarCallback?(segment)
+                        }
                     }
                 }
 
-                currentSamples = await MainActor.run {
+                current = await MainActor.run {
                     let next = self.pendingUtterance
                     self.pendingUtterance = nil
                     if next == nil {
@@ -603,8 +709,8 @@ final class AsrController {
     }
 }
 
-private extension AVAudioPCMBuffer {
-    var normalizedLevel: Float {
+extension AVAudioPCMBuffer {
+    fileprivate var normalizedLevel: Float {
         let frameCount = Int(frameLength)
         guard frameCount > 0 else { return 0 }
 
@@ -652,7 +758,7 @@ private extension AVAudioPCMBuffer {
         }
     }
 
-    func deepCopy() -> AVAudioPCMBuffer? {
+    fileprivate func deepCopy() -> AVAudioPCMBuffer? {
         guard let copy = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCapacity) else {
             return nil
         }

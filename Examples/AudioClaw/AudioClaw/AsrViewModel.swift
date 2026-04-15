@@ -13,6 +13,17 @@ final class AsrViewModel: ObservableObject {
     }
     @Published var selectedModel: DemoModel = .english
     @Published var vadEnabled: Bool = true
+    @Published var diarizationEnabled: Bool = false
+    @Published var selectedDiarizationEngine: DiarizationEngineType = .sortformer
+    @Published var selectedLSEENDVariant: LSEENDVariant = .dihard3
+    @Published var sortformerPredScoreThreshold: Double = 0.18 {
+        didSet {
+            // Force re-init on next run so the new threshold takes effect.
+            loadedDiarizationKey = nil
+        }
+    }
+    @Published private(set) var diarizedSegments: [DiarizedTranscriptSegment] = []
+    @Published var pendingFileURL: URL? = nil
     @Published private(set) var fullTranscript: String = ""
     @Published private(set) var liveTranscript: String = ""
     @Published private(set) var statusText: String = "Idle"
@@ -58,11 +69,13 @@ final class AsrViewModel: ObservableObject {
     }
 
     private let controller = AsrController()
+    private let diarizationController = DiarizationController()
     private var updatesTask: Task<Void, Never>?
     private var fileUpdatesTask: Task<Void, Never>?
     private var timerTask: Task<Void, Never>?
     private var levelDecayTask: Task<Void, Never>?
     private var sessionStartedAt: Date?
+    private var loadedDiarizationKey: String?
 
     func prepareIfNeeded() async {
         let devices = controller.availableInputDevices()
@@ -82,12 +95,50 @@ final class AsrViewModel: ObservableObject {
         lastPartialText = ""
         lastConfidence = 0
         recentUpdates = []
+        diarizedSegments = []
         lastSavedDebugWavPath = ""
         vadSpeechStartCount = 0
         vadSpeechEndCount = 0
         vadForcedSplitCount = 0
         lastVadEventText = isRecording ? "Waiting for VAD events" : "No VAD events yet"
         statusText = isRecording ? "Listening..." : "Idle"
+    }
+
+    /// Ensure the diarization engine is initialized for the requested configuration.
+    /// Reloads if engine or LS-EEND variant changed since last load.
+    private func ensureDiarizationLoaded(forStreaming: Bool) async throws {
+        let engine = selectedDiarizationEngine
+        if forStreaming, !engine.isStreamingCapable {
+            throw DiarizationError.offlineEngineNotSupportedForStreaming
+        }
+        let thresholdKey = String(format: "%.3f", sortformerPredScoreThreshold)
+        let key = "\(engine.rawValue):\(selectedLSEENDVariant.rawValue):\(thresholdKey)"
+        if loadedDiarizationKey == key, await diarizationController.isInitialized {
+            return
+        }
+        statusText = "Loading \(engine.rawValue) diarizer..."
+        try await diarizationController.initialize(
+            engine: engine,
+            lseendVariant: selectedLSEENDVariant,
+            sortformerConfig: SortformerConfig(
+                modelVariant: .balancedV2,
+                chunkLen: 6,
+                chunkLeftContext: 1,
+                chunkRightContext: 7,
+                fifoLen: 188,
+                spkcacheLen: 188,
+                spkcacheUpdatePeriod: 144,
+                predScoreThreshold: Float(sortformerPredScoreThreshold)
+            ),
+            progressHandler: { [weak self] progress in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.downloadProgress = progress.fractionCompleted
+                    self.statusText = Self.makeStatusText(for: progress)
+                }
+            }
+        )
+        loadedDiarizationKey = key
     }
 
     func toggleRecording() async {
@@ -109,6 +160,23 @@ final class AsrViewModel: ObservableObject {
             try await requestMicrophonePermission()
 
             statusText = "Loading \(selectedModel.title)..."
+
+            if diarizationEnabled {
+                try await ensureDiarizationLoaded(forStreaming: true)
+                controller.diarizationController = diarizationController
+            } else {
+                controller.diarizationController = nil
+            }
+
+            var onDiarizedSegment: (@Sendable (DiarizedTranscriptSegment) -> Void)? = nil
+            if diarizationEnabled {
+                onDiarizedSegment = { [weak self] segment in
+                    Task { @MainActor in
+                        self?.appendDiarizedSegment(segment)
+                    }
+                }
+            }
+
             let updates = try await controller.start(
                 modelVersion: selectedModel.asrModelVersion,
                 selectedDeviceID: selectedInputDeviceID.isEmpty ? nil : selectedInputDeviceID,
@@ -135,7 +203,8 @@ final class AsrViewModel: ObservableObject {
                     Task { @MainActor [weak self] in
                         self?.handleVadEvent(event)
                     }
-                }
+                },
+                onDiarizedSegment: onDiarizedSegment
             )
 
             updatesTask?.cancel()
@@ -215,6 +284,25 @@ final class AsrViewModel: ObservableObject {
         }
     }
 
+    /// Stash a picked file URL without starting transcription. The user must press "Run".
+    func selectFile(url: URL) {
+        pendingFileURL = url
+        statusText = "Selected \(url.lastPathComponent) — press Run to transcribe"
+    }
+
+    func clearPendingFile() {
+        pendingFileURL = nil
+        if !isRecording, !isTranscribingFile {
+            statusText = "Idle"
+        }
+    }
+
+    /// Run transcription on the currently selected pending file.
+    func runPendingFile() async {
+        guard let url = pendingFileURL else { return }
+        await transcribeFile(url: url)
+    }
+
     func transcribeFile(url: URL) async {
         guard !isBusy, !isRecording else { return }
 
@@ -224,13 +312,33 @@ final class AsrViewModel: ObservableObject {
         fullTranscript = ""
         liveTranscript = ""
         recentUpdates = []
+        diarizedSegments = []
         statusText = "Loading \(selectedModel.title)..."
 
         do {
+            if diarizationEnabled {
+                try await ensureDiarizationLoaded(forStreaming: false)
+                controller.diarizationController = diarizationController
+            } else {
+                controller.diarizationController = nil
+            }
+
+            var onDiarizedSegment: (@Sendable (DiarizedTranscriptSegment) -> Void)? = nil
+            if diarizationEnabled {
+                onDiarizedSegment = { [weak self] segment in
+                    Task { @MainActor in
+                        self?.appendDiarizedSegment(segment)
+                    }
+                }
+            }
+
+            // VAD is intentionally forced off for file transcription: sliding-window ASR
+            // already segments long audio, and a VAD pre-pass would double the latency
+            // for no quality gain.
             let updates = try await controller.transcribeFile(
                 url: url,
                 modelVersion: selectedModel.asrModelVersion,
-                vadEnabled: vadEnabled,
+                vadEnabled: false,
                 modelProgressHandler: { [weak self] progress in
                     Task { @MainActor [weak self] in
                         guard let self else { return }
@@ -243,9 +351,12 @@ final class AsrViewModel: ObservableObject {
                         guard let self else { return }
                         fileTranscriptionProgress = progress
                         let pct = Int(progress * 100)
-                        statusText = pct < 50 ? "Analyzing audio... \(pct * 2)%" : "Transcribing... \(Int((progress - 0.5) * 200))%"
+                        statusText =
+                            pct < 50
+                            ? "Analyzing audio... \(pct * 2)%" : "Transcribing... \(Int((progress - 0.5) * 200))%"
                     }
-                }
+                },
+                onDiarizedSegment: onDiarizedSegment
             )
 
             downloadProgress = nil
@@ -310,7 +421,8 @@ final class AsrViewModel: ObservableObject {
             return existing
         }
 
-        let needsSpace = !existing.hasSuffix(" ")
+        let needsSpace =
+            !existing.hasSuffix(" ")
             && !newText.hasPrefix(",")
             && !newText.hasPrefix(".")
             && !newText.hasPrefix("!")
@@ -350,13 +462,22 @@ final class AsrViewModel: ObservableObject {
             appendSystemRecentUpdate(text: "VAD speechEnd", confidence: probability)
         case .forcedSplit(let probability, let seconds):
             vadForcedSplitCount += 1
-            lastVadEventText = "forcedSplit \(String(format: "%.1f", seconds))s @ \(String(format: "%.2f", probability))"
+            lastVadEventText =
+                "forcedSplit \(String(format: "%.1f", seconds))s @ \(String(format: "%.2f", probability))"
             appendSystemRecentUpdate(
                 text: "Fallback split after \(String(format: "%.1f", seconds))s",
                 confidence: probability,
                 phase: .fallback
             )
         }
+    }
+
+    private func appendDiarizedSegment(_ segment: DiarizedTranscriptSegment) {
+        diarizedSegments.append(segment)
+    }
+
+    var uniqueSpeakerCount: Int {
+        Set(diarizedSegments.map(\.speakerIndex)).count
     }
 
     private func appendSystemRecentUpdate(
@@ -546,7 +667,8 @@ enum AudioClawError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .microphonePermissionDenied:
-            return "Microphone permission is required. Enable it for AudioClaw in System Settings > Privacy & Security > Microphone."
+            return
+                "Microphone permission is required. Enable it for AudioClaw in System Settings > Privacy & Security > Microphone."
         case .noAudioInputDevice:
             return "No audio input device is available."
         case .cannotAddAudioInput(let deviceName):
