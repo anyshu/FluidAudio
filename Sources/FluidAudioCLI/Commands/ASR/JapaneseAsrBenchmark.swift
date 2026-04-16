@@ -28,7 +28,7 @@ enum JapaneseAsrBenchmark {
 
     static func run(arguments: [String]) async {
         var dataset: Dataset = .jsut
-        var numSamples = 100
+        var numSamples = Int.max
         var outputFile: String?
         var verbose = false
         var autoDownload = false
@@ -71,27 +71,27 @@ enum JapaneseAsrBenchmark {
             i += 1
         }
 
-        logger.info("=== Japanese ASR Benchmark ===")
-        logger.info("Dataset: \(dataset.displayName)")
-        logger.info("Decoder: TDT (via AsrModels)")
-        logger.info("Samples: \(numSamples)")
-        logger.info("")
+        print("=== Japanese ASR Benchmark ===")
+        print("Dataset: \(dataset.displayName)")
+        print("Decoder: TDT (via AsrModels)")
+        print("Samples: \(numSamples)")
+        print("")
 
         do {
             // Load dataset
-            logger.info("Loading \(dataset.displayName)...")
+            print("Loading \(dataset.displayName)...")
 
             let samples: [JapaneseBenchmarkSample]
             do {
                 samples = try await loadSamples(for: dataset, maxSamples: numSamples)
             } catch JapaneseDatasetError.datasetNotFound(let message) {
                 if autoDownload {
-                    logger.info("Dataset not found, auto-downloading...")
+                    print("Dataset not found, auto-downloading...")
                     await downloadDataset(dataset, maxSamples: numSamples)
                     samples = try await loadSamples(for: dataset, maxSamples: numSamples)
                 } else {
                     logger.error(message)
-                    logger.info("Use --auto-download to download automatically")
+                    print("Use --auto-download to download automatically")
                     return
                 }
             }
@@ -101,22 +101,22 @@ enum JapaneseAsrBenchmark {
                 return
             }
 
-            logger.info("Loaded \(samples.count) samples")
-            logger.info("")
+            print("Loaded \(samples.count) samples")
+            print("")
 
             // Load TDT Japanese models via AsrModels
-            logger.info("Loading Japanese TDT models...")
+            print("Loading Japanese TDT models...")
             let models = try await AsrModels.load(
                 from: AsrModels.defaultCacheDirectory(for: .tdtJa),
                 version: .tdtJa,
                 progressHandler: verbose ? createProgressHandler() : nil
             )
-            logger.info("Models loaded successfully")
+            print("Models loaded successfully")
 
             // Create AsrManager with Japanese TDT models
             let asrManager = AsrManager(models: models)
-            logger.info("")
-            logger.info("Running transcription benchmark...")
+            print("")
+            print("Running transcription benchmark...")
 
             // Run benchmark
             let results = try await runBenchmark(samples: samples) { audioURL in
@@ -131,8 +131,8 @@ enum JapaneseAsrBenchmark {
             // Save to JSON if requested
             if let outputFile = outputFile {
                 try saveResults(results: results, outputFile: outputFile, dataset: dataset)
-                logger.info("")
-                logger.info("Results saved to: \(outputFile)")
+                print("")
+                print("Results saved to: \(outputFile)")
             }
 
         } catch {
@@ -240,7 +240,7 @@ enum JapaneseAsrBenchmark {
             results.append(result)
 
             if (index + 1) % 10 == 0 {
-                logger.info("Processed \(index + 1)/\(samples.count) samples...")
+                print("Processed \(index + 1)/\(samples.count) samples...")
             }
         }
 
@@ -392,7 +392,7 @@ enum JapaneseAsrBenchmark {
 
     private static func printResults(results: [BenchmarkResult], dataset: Dataset) {
         guard !results.isEmpty else {
-            logger.info("No results to display")
+            print("No results to display")
             return
         }
 
@@ -405,28 +405,36 @@ enum JapaneseAsrBenchmark {
         let meanLatency = latencies.reduce(0, +) / Double(latencies.count)
         let meanRTFx = rtfxs.reduce(0, +) / Double(rtfxs.count)
 
-        logger.info("")
-        logger.info("=== Benchmark Results ===")
-        logger.info("Dataset: \(dataset.displayName)")
-        logger.info("Samples: \(results.count)")
-        logger.info("")
-        logger.info("Mean CER: \(String(format: "%.2f", meanCER))%")
-        logger.info("Median CER: \(String(format: "%.2f", medianCER))%")
-        logger.info("Mean Latency: \(String(format: "%.1f", meanLatency))ms")
-        logger.info("Mean RTFx: \(String(format: "%.1f", meanRTFx))x")
+        let totalAudioSec = results.map { $0.audioDurationSec }.reduce(0, +)
+        let totalProcessingSec = results.map { $0.latencyMs }.reduce(0, +) / 1000.0
+        let overallRTFx = totalAudioSec / totalProcessingSec
+        let medianRTFx = median(rtfxs)
+
+        print("")
+        print("=== Benchmark Results ===")
+        print("Dataset: \(dataset.displayName)")
+        print("Model: Parakeet TDT ja")
+        print("Files processed: \(results.count)")
+        print("")
+        print("Average CER: \(String(format: "%.1f", meanCER))%")
+        print("Median CER: \(String(format: "%.1f", medianCER))%")
+        print("Median RTFx: \(String(format: "%.1f", medianRTFx))x")
+        print(
+            "Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioSec))s / \(String(format: "%.1f", totalProcessingSec))s)"
+        )
 
         // CER distribution
         let below5 = cers.filter { $0 < 0.05 }.count
         let below10 = cers.filter { $0 < 0.10 }.count
         let below20 = cers.filter { $0 < 0.20 }.count
 
-        logger.info("")
-        logger.info("CER Distribution:")
-        logger.info(
+        print("")
+        print("CER Distribution:")
+        print(
             "  <5%: \(below5) samples (\(String(format: "%.1f", Double(below5) / Double(results.count) * 100.0))%)")
-        logger.info(
+        print(
             "  <10%: \(below10) samples (\(String(format: "%.1f", Double(below10) / Double(results.count) * 100.0))%)")
-        logger.info(
+        print(
             "  <20%: \(below20) samples (\(String(format: "%.1f", Double(below20) / Double(results.count) * 100.0))%)")
     }
 

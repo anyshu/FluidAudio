@@ -7,7 +7,7 @@ enum CtcZhCnBenchmark {
     private static let logger = AppLogger(category: "CtcZhCnBenchmark")
 
     static func run(arguments: [String]) async {
-        var numSamples = 100
+        var numSamples = Int.max
         var useInt8 = true
         var outputFile: String?
         var verbose = false
@@ -50,19 +50,19 @@ enum CtcZhCnBenchmark {
             i += 1
         }
 
-        logger.info("=== Parakeet CTC zh-CN Benchmark ===")
-        logger.info("Encoder: \(useInt8 ? "int8 (0.55GB)" : "fp32 (1.1GB)")")
-        logger.info("Samples: \(numSamples)")
-        logger.info("")
+        print("=== Parakeet CTC zh-CN Benchmark ===")
+        print("Encoder: \(useInt8 ? "int8 (0.55GB)" : "fp32 (1.1GB)")")
+        print("Samples: \(numSamples)")
+        print("")
 
         do {
             // Load models
-            logger.info("Loading CTC zh-CN models...")
+            print("Loading CTC zh-CN models...")
             let manager = try await CtcZhCnManager.load(
                 useInt8Encoder: useInt8,
                 progressHandler: verbose ? createProgressHandler() : nil
             )
-            logger.info("Models loaded successfully")
+            print("Models loaded successfully")
 
             // Download dataset if needed
             if autoDownload && datasetPath == nil {
@@ -70,17 +70,17 @@ enum CtcZhCnBenchmark {
             }
 
             // Load THCHS-30 dataset
-            logger.info("")
-            logger.info("Loading THCHS-30 test set...")
+            print("")
+            print("Loading THCHS-30 test set...")
             let samples = try await ChineseDatasetLoader.loadTHCHS30Samples(
                 maxSamples: numSamples,
                 datasetPath: datasetPath
             )
-            logger.info("Loaded \(samples.count) samples")
+            print("Loaded \(samples.count) samples")
 
             // Run benchmark
-            logger.info("")
-            logger.info("Running transcription benchmark...")
+            print("")
+            print("Running transcription benchmark...")
             let results = try await runBenchmark(manager: manager, samples: samples)
 
             // Print results
@@ -89,8 +89,8 @@ enum CtcZhCnBenchmark {
             // Save to JSON if requested
             if let outputFile = outputFile {
                 try saveResults(results: results, outputFile: outputFile)
-                logger.info("")
-                logger.info("Results saved to: \(outputFile)")
+                print("")
+                print("Results saved to: \(outputFile)")
             }
 
         } catch {
@@ -149,7 +149,7 @@ enum CtcZhCnBenchmark {
             results.append(result)
 
             if (index + 1) % 10 == 0 {
-                logger.info("Processed \(index + 1)/\(samples.count) samples...")
+                print("Processed \(index + 1)/\(samples.count) samples...")
             }
         }
 
@@ -251,7 +251,7 @@ enum CtcZhCnBenchmark {
 
     private static func printResults(results: [BenchmarkResult], encoderType: String) {
         guard !results.isEmpty else {
-            logger.info("No results to display")
+            print("No results to display")
             return
         }
 
@@ -264,28 +264,36 @@ enum CtcZhCnBenchmark {
         let meanLatency = latencies.reduce(0, +) / Double(latencies.count)
         let meanRTFx = rtfxs.reduce(0, +) / Double(rtfxs.count)
 
-        logger.info("")
-        logger.info("=== Benchmark Results ===")
-        logger.info("Encoder: \(encoderType)")
-        logger.info("Samples: \(results.count)")
-        logger.info("")
-        logger.info("Mean CER: \(String(format: "%.2f", meanCER))%")
-        logger.info("Median CER: \(String(format: "%.2f", medianCER))%")
-        logger.info("Mean Latency: \(String(format: "%.1f", meanLatency))ms")
-        logger.info("Mean RTFx: \(String(format: "%.1f", meanRTFx))x")
+        let totalAudioSec = results.map { $0.audioDurationSec }.reduce(0, +)
+        let totalProcessingSec = results.map { $0.latencyMs }.reduce(0, +) / 1000.0
+        let overallRTFx = totalAudioSec / totalProcessingSec
+        let medianRTFx = median(rtfxs)
+
+        print("")
+        print("=== Benchmark Results ===")
+        print("Dataset: THCHS-30")
+        print("Model: Parakeet CTC zh-CN (\(encoderType))")
+        print("Files processed: \(results.count)")
+        print("")
+        print("Average CER: \(String(format: "%.1f", meanCER))%")
+        print("Median CER: \(String(format: "%.1f", medianCER))%")
+        print("Median RTFx: \(String(format: "%.1f", medianRTFx))x")
+        print(
+            "Overall RTFx: \(String(format: "%.1f", overallRTFx))x (\(String(format: "%.1f", totalAudioSec))s / \(String(format: "%.1f", totalProcessingSec))s)"
+        )
 
         // CER distribution
         let below5 = cers.filter { $0 < 0.05 }.count
         let below10 = cers.filter { $0 < 0.10 }.count
         let below20 = cers.filter { $0 < 0.20 }.count
 
-        logger.info("")
-        logger.info("CER Distribution:")
-        logger.info(
+        print("")
+        print("CER Distribution:")
+        print(
             "  <5%: \(below5) samples (\(String(format: "%.1f", Double(below5) / Double(results.count) * 100.0))%)")
-        logger.info(
+        print(
             "  <10%: \(below10) samples (\(String(format: "%.1f", Double(below10) / Double(results.count) * 100.0))%)")
-        logger.info(
+        print(
             "  <20%: \(below20) samples (\(String(format: "%.1f", Double(below20) / Double(results.count) * 100.0))%)")
     }
 

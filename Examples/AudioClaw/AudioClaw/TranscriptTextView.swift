@@ -58,8 +58,8 @@ struct TranscriptTextView: NSViewRepresentable {
     }
 }
 
-private extension NSScrollView {
-    var isNearBottom: Bool {
+extension NSScrollView {
+    fileprivate var isNearBottom: Bool {
         guard let contentView = documentView else { return true }
         let visibleMaxY = self.contentView.documentVisibleRect.maxY
         let contentHeight = contentView.frame.maxY

@@ -64,7 +64,7 @@ extension DatasetDownloader {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = [
-            "huggingface-cli",
+            "hf",
             "download",
             "FluidInference/THCHS-30-tests",
             "--repo-type", "dataset",
@@ -82,7 +82,7 @@ extension DatasetDownloader {
                     NSLocalizedDescriptionKey:
                         """
                     Failed to download THCHS-30 dataset from HuggingFace.
-                    Make sure huggingface-cli is installed: pip install huggingface_hub
+                    Make sure huggingface_hub is installed: pip install huggingface_hub
                     """
                 ]
             )
