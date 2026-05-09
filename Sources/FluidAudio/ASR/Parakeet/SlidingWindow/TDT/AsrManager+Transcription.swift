@@ -3,10 +3,11 @@ import Foundation
 extension AsrManager {
 
     internal func transcribeWithState(
-        _ audioSamples: [Float], decoderState: inout TdtDecoderState
+        _ audioSamples: [Float], decoderState: inout TdtDecoderState, language: Language? = nil
     ) async throws -> ASRResult {
         guard isAvailable else { throw ASRError.notInitialized }
-        guard audioSamples.count >= config.sampleRate else { throw ASRError.invalidAudioData }
+        let minimumRequiredSamples = ASRConstants.minimumRequiredSamples(forSampleRate: config.sampleRate)
+        guard audioSamples.count >= minimumRequiredSamples else { throw ASRError.invalidAudioData }
 
         let startTime = Date()
 
@@ -19,7 +20,8 @@ extension AsrManager {
                 originalLength: frameAlignedLength,
                 actualAudioFrames: nil,  // Will be calculated from originalLength
                 decoderState: &decoderState,
-                isLastChunk: true  // Single-chunk: always first and last
+                isLastChunk: true,  // Single-chunk: always first and last
+                language: language
             )
 
             let result = processTranscriptionResult(
@@ -43,7 +45,8 @@ extension AsrManager {
             progressHandler: { [weak self] progress in
                 guard let self else { return }
                 await self.progressEmitter.report(progress: progress)
-            }
+            },
+            language: language
         )
 
         return result
@@ -55,7 +58,8 @@ extension AsrManager {
         _ chunkSamples: [Float],
         decoderState: inout TdtDecoderState,
         previousTokens: [Int] = [],
-        isLastChunk: Bool = false
+        isLastChunk: Bool = false,
+        language: Language? = nil
     ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], encoderSequenceLength: Int) {
         let (alignedSamples, frameAlignedLength) = frameAlignedAudio(
             chunkSamples, allowAlignment: previousTokens.isEmpty)
@@ -66,7 +70,8 @@ extension AsrManager {
             actualAudioFrames: nil,  // Will be calculated from originalLength
             decoderState: &decoderState,
             contextFrameAdjustment: 0,  // Non-streaming chunks don't use adaptive context
-            isLastChunk: isLastChunk
+            isLastChunk: isLastChunk,
+            language: language
         )
 
         // Apply token deduplication if previous tokens are provided

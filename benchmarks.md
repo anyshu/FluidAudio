@@ -118,6 +118,19 @@ swift build -c release
 
 ---
 
+# Parakeet TDT 0.6B v3 Benchmark Results
+
+## LibriSpeech test-clean (2,620 files, 19,452.5 s audio)
+
+| Encoder           | On-disk | Avg WER | Avg CER | Overall RTFx | Peak RAM |
+|-------------------|--------:|--------:|--------:|-------------:|---------:|
+| 8-bit palettized  | 425 MB  | 2.64%   | 1.03%   | 47.1×        | 153 MB   |
+| int4 linear/ch    | 285 MB  | 3.76%   | 1.59%   | 43.1×        | 139 MB   |
+
+Apple M2, `.cpuAndNeuralEngine`. Decoder/joint/preprocessor fp16 in both. Models: [FluidInference/parakeet-tdt-0.6b-v3-coreml](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml).
+
+---
+
 # Parakeet CTC zh-CN
 
 ## Configuration

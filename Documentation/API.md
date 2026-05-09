@@ -98,7 +98,7 @@ Use `OfflineDiarizerManager` when you need offline DER parity or want to run the
 
 `DiarizerTimeline` accumulates per-frame speaker probabilities and derives `DiarizerSpeaker` segments. Each speaker has `finalizedSegments` (confirmed) and `tentativeSegments` (may be revised). Segments expose `startTime`, `endTime`, `duration`, and `isFinalized`.
 
-**`DiarizerTimelineConfig`** controls post-processing (onset/offset thresholds default to 0.5, min segment/gap duration, optional rolling window cap). Both diarizers accept this at init.
+**`DiarizerTimelineConfig`** controls post-processing (onset/offset thresholds default to 0.5, min segment/gap duration, optional rolling window cap, and `storeSegments` for emit-only mode that skips creating `DiarizerSpeaker` objects entirely). Both diarizers accept this at init. See [DiarizerTimeline.md](Diarization/DiarizerTimeline.md#emit-only-mode-storesegments--false) for the emit-only mode contract.
 
 **Speaker Management:**
 - `upsertSpeaker(named:atIndex:) -> DiarizerSpeaker?`
@@ -398,6 +398,66 @@ try await manager.synthesizeToFile(
 - Real-time factor: ~5-10x on Apple Silicon
 - Output sample rate: 24kHz
 - Supports SSML for prosody control
+
+### KokoroAneManager
+ANE-resident sibling of `KokoroTtsManager` — splits the Kokoro 82M graph into
+7 CoreML stages so the ANE-friendly layers stay resident on the Neural
+Engine. **3-11× RTFx** on Apple Silicon vs. the single-graph default. See
+[KokoroAne](TTS/KokoroAne.md) for the full pipeline.
+
+**Key Methods:**
+- `init(defaultVoice:directory:computeUnits:modelStore:)`
+  - Defaults: `defaultVoice = "af_heart"`, `computeUnits = .default`
+    (per-stage assignment matching the laishere upstream)
+- `initialize(preloadVoices:) async throws`
+  - Download (if missing) and load all 7 `.mlmodelc` bundles + `vocab.json`
+    + `af_heart.bin`
+- `synthesize(text:voice:speed:) async throws -> Data`
+  - One-shot text → 24 kHz mono 16-bit PCM WAV
+- `synthesizeDetailed(text:voice:speed:) async throws -> KokoroAneSynthesisResult`
+  - Returns samples + per-stage timings
+- `synthesizeFromPhonemes(_:voice:speed:) async throws -> Data`
+  - Bypass G2P; feed an already-IPA phoneme string directly
+- `synthesizeFromPhonemesDetailed(_:voice:speed:) async throws -> KokoroAneSynthesisResult`
+- `setDefaultVoice(_:)` — override default voice for subsequent calls
+- `isAvailable() async -> Bool`
+- `cleanup() async` — drop loaded mlmodelcs + voice packs
+
+**Configuration:**
+- `defaultVoice`: voice id (default `"af_heart"` — only voice currently shipped)
+- `directory`: optional cache directory override
+- `computeUnits`: `KokoroAneComputeUnits` (per-stage `MLComputeUnits`)
+  - `.default` — Albert/PostAlbert/Alignment/Vocoder on `cpuAndNeuralEngine`,
+    Prosody/Noise/Tail on `.all`
+  - `.cpuAndGpu` — skip ANE entirely (debug baseline)
+- `speed`: speech rate multiplier (default `1.0`)
+
+**Limits:**
+- ≤ 510 IPA phonemes per call (no built-in chunker)
+- Single voice (`af_heart`)
+- No SSML / custom lexicon / markdown overrides
+
+**Usage:**
+```swift
+let manager = KokoroAneManager()
+try await manager.initialize()
+
+let wav = try await manager.synthesize(text: "Hello from FluidAudio!")
+try wav.write(to: URL(fileURLWithPath: "/tmp/demo.wav"))
+
+// With per-stage timings:
+let detail = try await manager.synthesizeDetailed(text: "Hi.")
+print("samples: \(detail.samples.count) @ \(detail.sampleRate) Hz")
+let t = detail.timings
+print("  albert=\(t.albert) postAlbert=\(t.postAlbert) alignment=\(t.alignment)")
+print("  prosody=\(t.prosody) noise=\(t.noise) vocoder=\(t.vocoder) tail=\(t.tail)")
+print("  total: \(t.totalMs) ms")
+```
+
+**Performance:**
+- Real-time factor: 3-11× RTFx on Apple Silicon (vs. 5-10× for `KokoroTtsManager`)
+- Cold load (first ever, ANE compile): ~20 s; warm load: ~0.3 s
+- Output sample rate: 24 kHz
 
 ### PocketTtsManager
 Lightweight streaming TTS with voice cloning support.
