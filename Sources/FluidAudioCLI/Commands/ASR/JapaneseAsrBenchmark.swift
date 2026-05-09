@@ -128,11 +128,24 @@ enum JapaneseAsrBenchmark {
             // Print results
             printResults(results: results, dataset: dataset)
 
-            // Save to JSON if requested
-            if let outputFile = outputFile {
-                try saveResults(results: results, outputFile: outputFile, dataset: dataset)
+            // Save to JSON. Default goes to benchmark_results/parakeet_ja_<dataset>.json
+            // unless --output none.
+            let resolvedOutput: String?
+            if let user = outputFile {
+                resolvedOutput = ["none", "no", "off", ""].contains(user.lowercased()) ? nil : user
+            } else {
+                let dsTag = dataset.rawValue.replacingOccurrences(of: "-", with: "_")
+                resolvedOutput = "benchmark_results/parakeet_ja_\(dsTag).json"
+            }
+
+            if let outPath = resolvedOutput {
+                let outURL = URL(fileURLWithPath: outPath)
+                try? FileManager.default.createDirectory(
+                    at: outURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true)
+                try saveResults(results: results, outputFile: outPath, dataset: dataset)
                 print("")
-                print("Results saved to: \(outputFile)")
+                print("Results saved to: \(outPath)")
             }
 
         } catch {
@@ -514,7 +527,8 @@ enum JapaneseAsrBenchmark {
                 --dataset, -d <name>    Dataset to use (default: jsut)
                                         Available: jsut, cv-test
                 --samples, -n <num>     Number of samples to test (default: 100)
-                --output, -o <file>     Save results to JSON file
+                --output, -o <file>     Save results to JSON. Default: benchmark_results/parakeet_ja_<dataset>.json
+                                        (pass 'none' to skip)
                 --auto-download         Download dataset if not found
                 --verbose, -v           Show download progress
                 --help, -h              Show this help message

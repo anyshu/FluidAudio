@@ -86,11 +86,23 @@ enum CtcZhCnBenchmark {
             // Print results
             printResults(results: results, encoderType: useInt8 ? "int8" : "fp32")
 
-            // Save to JSON if requested
-            if let outputFile = outputFile {
-                try saveResults(results: results, outputFile: outputFile)
+            // Save to JSON. Default goes to benchmark_results/parakeet_zh_cn_<encoder>.json,
+            // unless user explicitly passes --output none.
+            let resolvedOutput: String?
+            if let user = outputFile {
+                resolvedOutput = ["none", "no", "off", ""].contains(user.lowercased()) ? nil : user
+            } else {
+                resolvedOutput = "benchmark_results/parakeet_zh_cn_\(useInt8 ? "int8" : "fp32").json"
+            }
+
+            if let outPath = resolvedOutput {
+                let outURL = URL(fileURLWithPath: outPath)
+                try? FileManager.default.createDirectory(
+                    at: outURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true)
+                try saveResults(results: results, outputFile: outPath)
                 print("")
-                print("Results saved to: \(outputFile)")
+                print("Results saved to: \(outPath)")
             }
 
         } catch {
@@ -379,7 +391,8 @@ enum CtcZhCnBenchmark {
                 --samples, -n <num>      Number of samples to test (default: 100)
                 --int8                   Use int8 quantized encoder (default)
                 --fp32                   Use fp32 encoder
-                --output, -o <file>      Save results to JSON file
+                --output, -o <file>      Save results to JSON. Default: benchmark_results/parakeet_zh_cn_<encoder>.json
+                                         (pass 'none' to skip)
                 --dataset-path <path>    Path to THCHS-30 dataset directory
                 --auto-download          Download THCHS-30 from HuggingFace (requires huggingface-cli)
                 --verbose, -v            Show download progress

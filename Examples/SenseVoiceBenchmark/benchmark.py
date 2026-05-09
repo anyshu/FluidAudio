@@ -34,6 +34,17 @@ THCHS30_DIR = FLUIDAL_DATASETS / "THCHS-30"
 LIBRISPEECH_DIR = FLUIDAL_DATASETS / "LibriSpeech"
 JSUT_DIR = FLUIDAL_DATASETS / "JSUT-basic5000"
 
+# Default output: <repo_root>/benchmark_results/<file>. Resolved from this
+# script's location (Examples/SenseVoiceBenchmark/benchmark.py).
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "benchmark_results"
+
+
+def default_output_path(dataset: str) -> Path:
+    """sensevoice_all.json for full run, sensevoice_<ds>.json for single dataset."""
+    name = "sensevoice_all.json" if dataset == "all" else f"sensevoice_{dataset.replace('-', '_')}.json"
+    return DEFAULT_OUTPUT_DIR / name
+
 
 # ---------------------------------------------------------------------------
 # Edit distance helpers
@@ -651,9 +662,15 @@ def main():
     parser.add_argument(
         "--output",
         default=None,
-        help="Save results to JSON file",
+        help="Save results to JSON file (default: <repo>/benchmark_results/sensevoice_<dataset>.json; pass 'none' to skip)",
     )
     args = parser.parse_args()
+
+    # Resolve default output unless explicitly disabled.
+    if args.output is None:
+        args.output = str(default_output_path(args.dataset))
+    elif args.output.lower() in ("none", "no", "off", ""):
+        args.output = None
 
     # Load model (with ONNX type-mismatch fix applied first)
     from funasr_onnx import SenseVoiceSmall
@@ -726,9 +743,11 @@ def main():
                 "total_processing_sec": total_proc,
                 "results": results,
             }
-        with open(args.output, "w", encoding="utf-8") as f:
+        out_path = Path(args.output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
             json.dump(output, f, ensure_ascii=False, indent=2)
-        print(f"\nResults saved to: {args.output}")
+        print(f"\nResults saved to: {out_path}")
 
 
 if __name__ == "__main__":

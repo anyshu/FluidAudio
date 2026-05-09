@@ -11,6 +11,7 @@ xcuserdata/
 *.hmap
 
 *.txt
+!Examples/*/requirements.txt
 
 ## App packaging
 *.ipa
@@ -92,6 +93,7 @@ baseline*.json
 *results.json
 *benchmark*.json
 .sortformer_progress*.json
+benchmark_results/
 
 
 FluidAudioDatasets/
@@ -101,9 +103,10 @@ FluidAudioDatasets/
 Resources/
 !Sources/FluidAudio/Resources/
 !Sources/FluidAudio/Resources/**
-scripts/
+scripts/*
 !Scripts/parakeet_subset_benchmark.sh
 !Scripts/diarizer_subset_benchmark.sh
+!Scripts/generate_benchmark_report.py
 Documentation/parakeet-tdt/
 docs/parakeet-tdt/
 
@@ -114,3 +117,8 @@ fluidaudio_cli/*
 
 # Continuous Claude cache (local only)
 .claude/cache/
+.claude/settings.local.json
+
+# Python bytecode caches
+__pycache__/
+*.pyc

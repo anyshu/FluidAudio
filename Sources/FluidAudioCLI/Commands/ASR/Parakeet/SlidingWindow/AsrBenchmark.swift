@@ -752,7 +752,7 @@ extension ASRBenchmark {
         var subset = "test-clean"
         var maxFiles: Int?
         var singleFile: String?
-        var outputFile = "asr_benchmark_results.json"
+        var outputFile: String? = nil  // resolved after parsing
         var debugMode = false
         var autoDownload = true  // Default to true for automatic download
         var testStreaming = false
@@ -832,13 +832,28 @@ extension ASRBenchmark {
             i += 1
         }
 
+        // Resolve default output path: benchmark_results/parakeet_<version>_<subset>.json
+        if outputFile == nil {
+            let versionTag: String
+            switch modelVersion {
+            case .v2: versionTag = "v2"
+            case .v3: versionTag = "v3"
+            case .tdtCtc110m: versionTag = "tdt_ctc_110m"
+            case .ctcZhCn: versionTag = "ctc_zh_cn"
+            case .tdtJa: versionTag = "tdt_ja"
+            }
+            let subsetTag = subset.replacingOccurrences(of: "-", with: "_")
+            outputFile = "benchmark_results/parakeet_\(versionTag)_\(subsetTag).json"
+        }
+        let resolvedOutputFile = outputFile!  // safe: just resolved above
+
         logger.info("Starting ASR benchmark on LibriSpeech \(subset)")
         if singleFile != nil {
             logger.info("   Processing single file: \(singleFile!)")
         } else {
             logger.info("   Max files: \(maxFiles?.description ?? "all")")
         }
-        logger.info("   Output file: \(outputFile)")
+        logger.info("   Output file: \(resolvedOutputFile)")
         let versionLabel: String
         switch modelVersion {
         case .v2: versionLabel = "v2"
@@ -1101,7 +1116,11 @@ extension ASRBenchmark {
 
             let jsonData = try JSONSerialization.data(
                 withJSONObject: output, options: [.prettyPrinted, .sortedKeys])
-            try jsonData.write(to: URL(fileURLWithPath: outputFile))
+            let outURL = URL(fileURLWithPath: resolvedOutputFile)
+            try? FileManager.default.createDirectory(
+                at: outURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            try jsonData.write(to: outURL)
 
             // Print detailed analysis for files with high WER
             benchmark.printDetailedWERAnalysis(results)
@@ -1137,7 +1156,7 @@ extension ASRBenchmark {
                                          Available: test-clean, test-other, dev-clean, dev-other
                 --max-files <number>      Maximum number of files to process (default: all)
                 --single-file <id>        Process only a specific file (e.g., 1089-134686-0011)
-                --output <file>           Output JSON file path (default: asr_benchmark_results.json)
+                --output <file>           Output JSON path (default: benchmark_results/parakeet_<version>_<subset>.json)
                 --model-version <version> ASR model version to use: v2, v3, or tdt-ctc-110m (default: v3)
                 --debug                   Enable debug logging
                 --auto-download           Automatically download LibriSpeech dataset (default)
