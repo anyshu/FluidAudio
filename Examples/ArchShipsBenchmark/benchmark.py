@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-VoxTrace remote ASR + diarization benchmark.
+ArchShips ASR + ArchShips diarization benchmark.
 
-The API call shape follows ~/working/temp/voxtrace.py: an OpenAI-compatible
-/chat/completions request with a base64 WAV audio_url payload. The default model
-returns diarization-style JSON segments with Start time, End time, Speaker ID,
-and Content fields.
+ASR uses the OpenAI-compatible /audio/transcriptions endpoint with multipart
+file upload. Diarization can score raw /audio/diarization speaker_turns or the
+final diarized JSON from /chat/completions.
 
 Install:
     pip install -r requirements.txt
@@ -21,7 +20,7 @@ Usage:
     # Final diarized_json benchmark through the chat API
     python benchmark.py --task diarization --dataset ami --diarization-source chat --mode full --single-file ES2004a
 
-API key resolution: --api-key > $VOXTRACE_API_KEY > $OPENAI_API_KEY
+API key resolution: --api-key > $ARCHSHIPS_API_KEY > $OPENAI_API_KEY
 """
 
 from __future__ import annotations
@@ -62,13 +61,14 @@ try:
 except ImportError as e:
     print(
         f"ERROR: cannot import shared helpers from {SHARED_DIR}/benchmark.py: {e}\n"
-        "Keep VoxTraceBenchmark next to SenseVoiceBenchmark."
+        "Keep ArchShipsBenchmark next to SenseVoiceBenchmark."
     )
     sys.exit(2)
 
 
-DEFAULT_API_URL = "https://next-api.fazhipro.com/v1/chat/completions"
-DEFAULT_MODEL = "arcships-asr-diarize"
+DEFAULT_API_URL = "https://next-api.fazhipro.com/v1/audio/transcriptions"
+DEFAULT_MODEL = "arcships-asr"
+DEFAULT_DIARIZATION_MODEL = "arcships-asr-diarize"
 DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant that transcribes audio input into text output in JSON format."
 DEFAULT_USER_PROMPT_TEMPLATE = ""
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -98,10 +98,10 @@ class Segment:
 def default_output_path(task: str, dataset: str, mode: str | None, diarization_source: str = "raw") -> Path:
     dataset_name = dataset.replace("-", "_")
     if task == "asr":
-        return DEFAULT_OUTPUT_DIR / f"voxtrace_asr_{dataset_name}.json"
+        return DEFAULT_OUTPUT_DIR / f"archships_asr_{dataset_name}.json"
     if diarization_source == "chat":
-        return DEFAULT_OUTPUT_DIR / f"voxtrace_{task}_{mode}_{dataset_name}.json"
-    return DEFAULT_OUTPUT_DIR / f"voxtrace_{task}_raw_{dataset_name}.json"
+        return DEFAULT_OUTPUT_DIR / f"archships_{task}_{mode}_{dataset_name}.json"
+    return DEFAULT_OUTPUT_DIR / f"archships_{task}_raw_{dataset_name}.json"
 
 
 def audio_to_data_url(audio_path: str, target_sr: int = 16000) -> tuple[str, float]:
@@ -123,7 +123,7 @@ def audio_to_data_url(audio_path: str, target_sr: int = 16000) -> tuple[str, flo
     return f"data:audio/wav;base64,{b64}", duration
 
 
-def call_voxtrace(
+def call_archships(
     audio_data_url: str,
     api_url: str,
     api_key: str,
@@ -168,12 +168,50 @@ def call_voxtrace(
     return str(content), payload
 
 
+def call_archships_asr(
+    audio_path: str,
+    api_url: str,
+    api_key: str,
+    model: str,
+    timeout: float,
+) -> tuple[str, dict[str, Any]]:
+    headers = {"Authorization": f"Bearer {api_key}"}
+    data = {"model": model}
+    with open(audio_path, "rb") as audio_file:
+        files = {"file": (Path(audio_path).name, audio_file)}
+        resp = requests.post(api_url, headers=headers, data=data, files=files, timeout=timeout)
+    if resp.status_code in (429, 500, 502, 503, 504):
+        raise TransientError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+    if not resp.ok:
+        raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:500]}")
+    payload = resp.json()
+    transcript = payload.get("text")
+    if transcript is None:
+        raise RuntimeError(f"Unexpected ASR response shape: {payload}")
+    return str(transcript), payload
+
+
 def call_with_retries(*args: Any, max_retries: int = 4, **kwargs: Any) -> tuple[str, dict[str, Any]]:
     delay = 1.0
     last_err: Exception | None = None
     for attempt in range(max_retries + 1):
         try:
-            return call_voxtrace(*args, **kwargs)
+            return call_archships(*args, **kwargs)
+        except TransientError as e:
+            last_err = e
+            if attempt == max_retries:
+                break
+            time.sleep(delay)
+            delay = min(delay * 2, 30.0)
+    raise RuntimeError(f"Exceeded retries: {last_err}")
+
+
+def call_asr_with_retries(*args: Any, max_retries: int = 4, **kwargs: Any) -> tuple[str, dict[str, Any]]:
+    delay = 1.0
+    last_err: Exception | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            return call_archships_asr(*args, **kwargs)
         except TransientError as e:
             last_err = e
             if attempt == max_retries:
@@ -368,24 +406,18 @@ def process_asr_sample(sample: dict[str, str], options: argparse.Namespace, metr
     except Exception as e:
         return {"audio": audio, "error": f"decode: {e}"}
 
-    user_prompt = options.user_prompt_template.format(duration=duration)
     t0 = time.perf_counter()
     try:
-        raw, _ = call_with_retries(
-            data_url,
+        transcript, raw_payload = call_asr_with_retries(
+            audio,
             options.api_url,
             options.api_key,
             options.model,
             options.timeout,
-            options.system_prompt,
-            user_prompt,
-            options.max_tokens,
-            options.temperature,
         )
     except Exception as e:
         return {"audio": audio, "error": f"api: {e}", "duration_sec": duration}
     latency = time.perf_counter() - t0
-    transcript = extract_transcript(raw)
 
     if metric == "wer":
         ref_n = normalize_english(reference)
@@ -404,7 +436,7 @@ def process_asr_sample(sample: dict[str, str], options: argparse.Namespace, metr
 
     return {
         "audio": audio,
-        "raw_response_preview": raw[:300],
+        "raw_response_preview": json.dumps(raw_payload, ensure_ascii=False)[:300],
         "hypothesis_extracted": transcript[:500],
         "reference_norm": ref_n,
         "hypothesis_norm": hyp_n,
@@ -781,19 +813,20 @@ def main() -> None:
     parser.add_argument("--max-files", type=int, default=None)
     parser.add_argument("--concurrency", type=int, default=2)
     parser.add_argument("--timeout", type=float, default=12000.0)
-    parser.add_argument("--api-url", default=os.environ.get("VOXTRACE_API_URL", DEFAULT_API_URL))
+    parser.add_argument("--api-url", default=os.environ.get("ARCHSHIPS_API_URL", DEFAULT_API_URL))
     parser.add_argument(
         "--diarization-api-url",
-        default=os.environ.get("VOXTRACE_DIARIZATION_API_URL", "http://127.0.0.1:28211/v1/audio/diarization"),
+        default=os.environ.get("ARCHSHIPS_DIARIZATION_API_URL", "http://127.0.0.1:28211/v1/audio/diarization"),
         help="/v1/audio/diarization JSON audio_url endpoint, or /v1/audio/transcriptions multipart fallback.",
     )
     parser.add_argument(
         "--audio-base-url",
-        default=os.environ.get("VOXTRACE_AUDIO_BASE_URL"),
+        default=os.environ.get("ARCHSHIPS_AUDIO_BASE_URL"),
         help="Base URL that exposes the local dataset audio files by basename for /v1/audio/diarization.",
     )
-    parser.add_argument("--model", default=os.environ.get("VOXTRACE_MODEL", DEFAULT_MODEL))
-    parser.add_argument("--api-key", default=os.environ.get("VOXTRACE_API_KEY") or os.environ.get("OPENAI_API_KEY"))
+    parser.add_argument("--model", default=os.environ.get("ARCHSHIPS_MODEL", DEFAULT_MODEL))
+    parser.add_argument("--diarization-model", default=os.environ.get("ARCHSHIPS_DIARIZATION_MODEL", DEFAULT_DIARIZATION_MODEL))
+    parser.add_argument("--api-key", default=os.environ.get("ARCHSHIPS_API_KEY") or os.environ.get("OPENAI_API_KEY"))
     parser.add_argument("--max-tokens", type=int, default=8192)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--system-prompt", default=DEFAULT_SYSTEM_PROMPT)
@@ -804,12 +837,12 @@ def main() -> None:
     parser.add_argument("--frame-step", type=float, default=0.01)
     parser.add_argument("--min-speakers", type=int, default=None)
     parser.add_argument("--max-speakers", type=int, default=None)
-    parser.add_argument("--output", default=None, help="Write JSON here (default: benchmark_results/voxtrace_*.json; 'none' disables)")
+    parser.add_argument("--output", default=None, help="Write JSON here (default: benchmark_results/archships_*.json; 'none' disables)")
     args = parser.parse_args()
 
     if args.task == "asr" or (args.task == "diarization" and args.diarization_source == "chat"):
         if not args.api_key:
-            print("ERROR: no API key. Pass --api-key or set $VOXTRACE_API_KEY.", file=sys.stderr)
+            print("ERROR: no API key. Pass --api-key or set $ARCHSHIPS_API_KEY.", file=sys.stderr)
             sys.exit(2)
 
     if args.min_speakers is not None and args.max_speakers is not None and args.min_speakers > args.max_speakers:
@@ -827,6 +860,8 @@ def main() -> None:
             parser.error("--mode is required when --task diarization")
         if args.dataset == "all":
             args.dataset = "ami"
+        if args.model == DEFAULT_MODEL:
+            args.model = args.diarization_model
 
     if args.output is None:
         args.output = str(default_output_path(args.task, args.dataset, args.mode, args.diarization_source))

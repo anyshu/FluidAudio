@@ -41,7 +41,7 @@ def load_qwen_aggregate(path: Path) -> dict:
     }
 
 
-def load_voxtrace_asr_aggregate(path: Path) -> dict:
+def load_archships_asr_aggregate(path: Path) -> dict:
     with open(path) as f:
         d = json.load(f)
     out = {}
@@ -162,7 +162,7 @@ models["SenseVoice Small"] = load_sensevoice_aggregate(RESULTS / "sensevoice_all
 models["Qwen3-ASR-1.7B"] = load_qwen_aggregate(RESULTS / "qwen3_all.json")
 models["Qwen3-Omni"] = load_qwen_aggregate(RESULTS / "qwen3_omni_all.json")
 models["VibeVoice-ASR-7B"] = load_qwen_aggregate(RESULTS / "vibevoice_all.json")
-models["VoxTrace ASR"] = load_voxtrace_asr_aggregate(RESULTS / "voxtrace_asr_librispeech.json")
+models["ArchShips ASR"] = load_archships_asr_aggregate(RESULTS / "archships_asr_all.json")
 
 DATASETS: list[tuple[str, str, str]] = [
     ("LibriSpeech test-clean", "WER", "English"),
@@ -180,7 +180,7 @@ MODEL_TYPES = {
     "Qwen3-ASR-1.7B": ("remote", "Remote GPU · OpenAI-compatible API"),
     "Qwen3-Omni": ("remote", "Remote GPU · OpenAI-compatible API"),
     "VibeVoice-ASR-7B": ("remote", "Remote GPU · OpenAI-compatible API"),
-    "VoxTrace ASR": ("remote", "Remote GPU · OpenAI-compatible API"),
+    "ArchShips ASR": ("remote", "Remote GPU · OpenAI-compatible API"),
 }
 
 
@@ -212,8 +212,8 @@ def load_diarization(path: Path) -> dict:
     }
 
 
-def load_voxtrace_diarization(path: Path) -> dict:
-    """VoxTrace diarization JSON is an aggregate wrapper with fractional metrics."""
+def load_archships_diarization(path: Path) -> dict:
+    """ArchShips diarization JSON is an aggregate wrapper with fractional metrics."""
     with open(path) as f:
         data = json.load(f)
     dataset = data["datasets"][0]
@@ -270,15 +270,15 @@ for name, fnames in _diar_files:
         if p.exists():
             diarization_engines[name] = load_diarization(p)
             break
-_voxtrace_chunk_global = RESULTS / "voxtrace_diarization_chunk_global_ami.json"
-if _voxtrace_chunk_global.exists():
-    diarization_engines["VoxTrace final JSON (chunk_global)"] = load_voxtrace_diarization(_voxtrace_chunk_global)
-_voxtrace_full = RESULTS / "voxtrace_diarization_full_ami.json"
-if _voxtrace_full.exists():
-    diarization_engines["VoxTrace final JSON (full)"] = load_voxtrace_diarization(_voxtrace_full)
-_voxtrace_raw = RESULTS / "voxtrace_diarization_raw_ami.json"
-if _voxtrace_raw.exists():
-    diarization_engines["VoxTrace raw speaker_turns"] = load_voxtrace_diarization(_voxtrace_raw)
+_archships_chunk_global = RESULTS / "archships_diarization_chunk_global_ami.json"
+if _archships_chunk_global.exists():
+    diarization_engines["ArchShips final JSON (chunk_global)"] = load_archships_diarization(_archships_chunk_global)
+_archships_full = RESULTS / "archships_diarization_full_ami.json"
+if _archships_full.exists():
+    diarization_engines["ArchShips final JSON (full)"] = load_archships_diarization(_archships_full)
+_archships_raw = RESULTS / "archships_diarization_raw_ami.json"
+if _archships_raw.exists():
+    diarization_engines["ArchShips raw speaker_turns"] = load_archships_diarization(_archships_raw)
 
 
 # ---------------------------------------------------------------------------
@@ -470,8 +470,8 @@ def render_findings() -> str:
          "Omni 是通用多模态模型而非专用 ASR,却在 4 个数据集上全部胜出,最大优势在日文 JSUT(10.92% vs 12.37% CER,–1.45pt)。代价是约慢 10–15%,因为多了 system/user prompt 的输入 token。"),
         ("VibeVoice-ASR-7B 英文有竞争力,其他语言中游",
          "在 LibriSpeech test-clean 上 2.87% WER 优于 SenseVoice(3.77%),但 test-other、中文、日文均落后于 Qwen3 系列和 SenseVoice。日文 15.15% CER 是它最弱项——训练数据可能英文为主。"),
-        ("VoxTrace ASR 英文小样本已进入第一梯队",
-         "VoxTrace ASR 在 LibriSpeech test-clean 100 文件样本上 WER 2.22%、中位 0%,接近 Qwen3-Omni / Qwen3-ASR / Parakeet 的全量成绩。注意它目前只跑了英文 100 文件,还不能和全量 2,620 文件结果完全等价。"),
+        ("ArchShips ASR 全量结果接近 Qwen3-ASR",
+         "ArchShips ASR 通过 /v1/audio/transcriptions 跑完 4 个数据集:LibriSpeech test-clean WER 2.09%、test-other 4.35%、THCHS-30 CER 2.92%、JSUT CER 12.35%。英文基本贴近 Qwen3-ASR-1.7B,中文略优于 Qwen3-ASR,日文仍落后于 SenseVoice/Qwen3-Omni。"),
         ("本地中文识别 SenseVoice 明显领先 Parakeet CTC",
          "SenseVoice Small(ONNX CPU)在 THCHS-30 上 CER 5.27%,Parakeet CTC zh-CN(int8)为 8.20%。Apple on-device 中文最弱 13.82%。Parakeet fp32 编码器版本暂未对比。"),
         ("日文 SenseVoice 与 Qwen3-Omni 平分秋色",
@@ -480,8 +480,8 @@ def render_findings() -> str:
          "Parakeet TDT v3 在英文 LibriSpeech 上 RTFx 突破 100×。SenseVoice 是非英文场景速度王者(60–80×)。Qwen3 系列 7–13× 瓶颈在网络往返而非推理本身。VibeVoice 是远程模型中最慢(3.6–6.1×),输出结构化 JSON 多生成不少 token。Apple 18–49×,因语言而异。"),
         ("Apple SFSpeechRecognizer 在跑过的数据集上全面落后",
          "on-device test-other WER 17.71%(领先模型 4–8%),中文 CER 13.82%。日文在这台机器上没有 on-device 资源——Apple 按硬件/区域分发语言包。"),
-        ("说话人分离 Pyannote community-1 是离线场景唯一的最优解",
-         "AMI SDM 16 会议、统一评分协议(collar 0.25 总宽度 + ignoreOverlap + pyannote 官方 RTTM)下:Pyannote community-1 (powerset 分割 + VBx 聚类) DER 9.81%、RTFx 316×,断档式领先。LS-EEND 18.28%(流式里最佳)、VoxTrace final JSON full 17.72%、VoxTrace final JSON chunk_global 20.00%、Pyannote 3.1 streaming 23.61%(SE 15.67% 主导,流式聚类无法回看)、Sortformer NVIDIA High-Latency 26.01%(30.4s 上下文,速度 154×)、Sortformer GD fastV2_1 29.06%(0.48s 上下文)。Sortformer 两个变体共有 Miss 18% 的短板,跟 chunk 大小无关,是模型本身的偏置。"),
+        ("ArchShips raw speaker_turns 目前 DER 最低",
+         "AMI SDM 16 会议、统一评分协议(collar 0.25 + ignoreOverlap + pyannote 官方 RTTM)下:ArchShips raw /v1/audio/diarization DER 7.12%、中位 6.80%,低于 FluidAudio Pyannote C1 raw 9.81%。final diarized_json 口径更严格:full 17.72%、chunk_global 20.00%,因为叠加 ASR、forced alignment、word speaker assignment 和 segment merge 误差。"),
     ]
     return "\n".join(
         f'<div class="finding"><h3>{escape(t)}</h3><p>{escape(b)}</p></div>'
@@ -497,9 +497,10 @@ def render_selection_table() -> str:
         ("联网 · 最高准确率",                  "Qwen3-Omni",               "4 个数据集全部胜出;比 ASR-1.7B 慢 10–15%"),
         ("联网 · 控制成本",                    "Qwen3-ASR-1.7B",           "英/中只比 Omni 落后 ≤0.2pt,单位 token 成本更低"),
         ("联网 · 转写 + 说话人分离",           "VibeVoice-ASR-7B",         "输出带 Speaker ID 和时间戳的结构化 JSON;英文有竞争力(WER 2.87%),中/日文落后"),
-        ("联网 · VoxTrace Diarization",      "优先看 raw speaker_turns",   "raw /v1/audio/diarization 与 Pyannote C1 同层级; final diarized_json 会叠加 ASR/align/segment merge 误差"),
+        ("联网 · ArchShips Diarization",      "优先看 raw speaker_turns",   "raw /v1/audio/diarization 与 Pyannote C1 同层级; final diarized_json 会叠加 ASR/align/segment merge 误差"),
         ("零依赖 · 系统 API",                  "Apple SFSpeechRecognizer", "无需安装,但每个数据集准确率落后 5-15pt"),
-        ("说话人分离 · 离线批量",              "Pyannote community-1 (VBx)", "AMI 16 会议 DER 9.81%、RTFx 316×,FluidAudio 主推方案"),
+        ("说话人分离 · 原始边界",              "ArchShips raw speaker_turns",  "AMI 16 会议 DER 7.12%;只评估 /v1/audio/diarization speaker_turns"),
+        ("说话人分离 · 离线批量",              "Pyannote community-1 (VBx)", "AMI 16 会议 DER 9.81%、RTFx 316×,FluidAudio 本地离线方案"),
         ("说话人分离 · 实时流式",              "LS-EEND",                  "DER 18.28%、RTFx 204×,流式场景的最佳折中(比 Pyannote 3.1 streaming 低 5pt)"),
     ]
     body = "\n".join(
@@ -520,9 +521,9 @@ def short_diarization_name(name: str) -> str:
         "Pyannote 3.1 (streaming)": "Pyannote 3.1",
         "Sortformer NVIDIA High-Latency": "Sortformer NVIDIA",
         "Sortformer GD (streaming, fastV2_1)": "Sortformer GD",
-        "VoxTrace final JSON (chunk_global)": "VoxTrace JSON CG",
-        "VoxTrace final JSON (full)": "VoxTrace JSON full",
-        "VoxTrace raw speaker_turns": "VoxTrace raw",
+        "ArchShips final JSON (chunk_global)": "ArchShips JSON CG",
+        "ArchShips final JSON (full)": "ArchShips JSON full",
+        "ArchShips raw speaker_turns": "ArchShips raw",
     }
     return short_names.get(name, name.split(" (")[0])
 
@@ -836,16 +837,16 @@ def render_inventory() -> str:
         ("qwen3_all.json",                   "Qwen3-ASR-1.7B (远程)",     "全部 4 个数据集"),
         ("qwen3_omni_all.json",              "Qwen3-Omni (远程)",         "全部 4 个数据集"),
         ("vibevoice_all.json",               "VibeVoice-ASR-7B (远程)",   "全部 4 个数据集"),
-        ("voxtrace_asr_librispeech.json",    "VoxTrace ASR (远程)",       "LibriSpeech test-clean 100 文件"),
+        ("archships_asr_all.json",           "ArchShips ASR (远程)",       "全部 4 个数据集"),
         ("apple_all.json",                   "Apple SFSpeechRecognizer",  "3 个数据集(无 JSUT)"),
         ("diarization_offline_ami_sdm.json",  "Pyannote community-1 (offline, VBx)", "AMI SDM 测试集 16 会议"),
         ("diarization_streaming_ami_sdm.json","Pyannote 3.1 (streaming)",           "AMI SDM 测试集 16 会议"),
         ("sortformer_nvidia_high_ami.json",    "Sortformer NVIDIA High-Latency", "AMI SDM 测试集 16 会议"),
         ("sortformer_ami.json",                "Sortformer GD (streaming, fastV2_1)", "AMI SDM 测试集 16 会议"),
         ("lseend_ami.json",                   "LS-EEND",                   "AMI SDM 测试集 16 会议"),
-        ("voxtrace_diarization_raw_ami.json", "VoxTrace raw speaker_turns", "AMI SDM 测试集 16 会议(/v1/audio/diarization)"),
-        ("voxtrace_diarization_full_ami.json", "VoxTrace final JSON full", "AMI SDM 测试集 16 会议(chat diarized_json)"),
-        ("voxtrace_diarization_chunk_global_ami.json", "VoxTrace final JSON chunk_global", "AMI SDM 测试集 16 会议(chat diarized_json)"),
+        ("archships_diarization_raw_ami.json", "ArchShips raw speaker_turns", "AMI SDM 测试集 16 会议(/v1/audio/diarization)"),
+        ("archships_diarization_full_ami.json", "ArchShips final JSON full", "AMI SDM 测试集 16 会议(chat diarized_json)"),
+        ("archships_diarization_chunk_global_ami.json", "ArchShips final JSON chunk_global", "AMI SDM 测试集 16 会议(chat diarized_json)"),
         ("qwen3_sweep.json",                  "Qwen3-ASR-1.7B 并发扫描",   "LibriSpeech test-clean 100 文件 × 7 个并发级别"),
     ]
     body = "\n".join(
@@ -1179,6 +1180,7 @@ def main():
 <div class="tabs" role="tablist" aria-label="报告分类">
   <button class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="tab-asr" data-tab="asr">ASR</button>
   <button class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="tab-diarization" data-tab="diarization">Diarization</button>
+  <button class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="tab-concurrency" data-tab="concurrency">并发</button>
 </div>
 
 <div id="tab-asr" class="tab-panel active" role="tabpanel">
@@ -1228,15 +1230,6 @@ def main():
   <div class="card">{render_selection_table()}</div>
 </section>
 
-<section id="concurrency">
-  <h2>远程模型并发扩展性 — Qwen3-ASR-1.7B</h2>
-  <p class="lede">
-    在 LibriSpeech test-clean 上取 100 个文件,以同样的样本扫描 7 个并发级别(1/2/4/8/16/32/64),
-    实测服务端容量曲线、最优并发点、过载阈值。这是给你做容量规划/选型的关键数据。
-  </p>
-  <div class="card">{render_concurrency_sweep()}</div>
-</section>
-
 </div>
 
 <div id="tab-diarization" class="tab-panel" role="tabpanel">
@@ -1256,6 +1249,19 @@ def main():
   <h2>原始数据文件</h2>
   <p class="lede">报告中每个数字都来自 <code>benchmark_results/</code> 下的某个 JSON 文件。</p>
   <div class="card">{render_inventory()}</div>
+</section>
+
+</div>
+
+<div id="tab-concurrency" class="tab-panel" role="tabpanel">
+
+<section id="concurrency">
+  <h2>Qwen3-ASR-1.7B（远程）</h2>
+  <p class="lede">
+    在 LibriSpeech test-clean 上取 100 个文件,以同样的样本扫描 7 个并发级别(1/2/4/8/16/32/64),
+    实测服务端容量曲线、最优并发点、过载阈值。这是给你做容量规划/选型的关键数据。
+  </p>
+  <div class="card">{render_concurrency_sweep()}</div>
 </section>
 
 </div>
