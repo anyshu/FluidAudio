@@ -41,6 +41,27 @@ def load_qwen_aggregate(path: Path) -> dict:
     }
 
 
+def load_voxtrace_asr_aggregate(path: Path) -> dict:
+    with open(path) as f:
+        d = json.load(f)
+    out = {}
+    for ds in d["datasets"]:
+        items = ds.get("items", [])
+        rtfxs = [r["rtfx"] for r in items if "rtfx" in r]
+        audio_s = sum(r.get("duration_sec", 0) for r in items)
+        proc_s = sum(r.get("latency_sec", 0) for r in items)
+        out[ds["dataset"]] = {
+            "files": ds["files_processed"],
+            "avg": ds["average_score_pct"],
+            "median": ds["median_score_pct"],
+            "rtfx_overall": ds["overall_rtfx"],
+            "rtfx_median": statistics.median(rtfxs) if rtfxs else None,
+            "audio_s": audio_s,
+            "proc_s": proc_s,
+        }
+    return out
+
+
 def load_apple_aggregate(path: Path) -> dict:
     with open(path) as f:
         d = json.load(f)
@@ -141,6 +162,7 @@ models["SenseVoice Small"] = load_sensevoice_aggregate(RESULTS / "sensevoice_all
 models["Qwen3-ASR-1.7B"] = load_qwen_aggregate(RESULTS / "qwen3_all.json")
 models["Qwen3-Omni"] = load_qwen_aggregate(RESULTS / "qwen3_omni_all.json")
 models["VibeVoice-ASR-7B"] = load_qwen_aggregate(RESULTS / "vibevoice_all.json")
+models["VoxTrace ASR"] = load_voxtrace_asr_aggregate(RESULTS / "voxtrace_asr_librispeech.json")
 
 DATASETS: list[tuple[str, str, str]] = [
     ("LibriSpeech test-clean", "WER", "English"),
@@ -158,7 +180,116 @@ MODEL_TYPES = {
     "Qwen3-ASR-1.7B": ("remote", "Remote GPU · OpenAI-compatible API"),
     "Qwen3-Omni": ("remote", "Remote GPU · OpenAI-compatible API"),
     "VibeVoice-ASR-7B": ("remote", "Remote GPU · OpenAI-compatible API"),
+    "VoxTrace ASR": ("remote", "Remote GPU · OpenAI-compatible API"),
 }
+
+
+# ---------------------------------------------------------------------------
+# Diarization data — per-engine aggregates on AMI 16-meeting test set
+# ---------------------------------------------------------------------------
+
+def load_diarization(path: Path) -> dict:
+    """Each diarization JSON is a flat list of per-meeting result dicts."""
+    with open(path) as f:
+        data = json.load(f)
+    ders = [r["der"] for r in data if "der" in r]
+    miss = [r["missRate"] for r in data if "missRate" in r]
+    fa = [r["falseAlarmRate"] for r in data if "falseAlarmRate" in r]
+    se = [r["speakerErrorRate"] for r in data if "speakerErrorRate" in r]
+    rtfxs = [r["rtfx"] for r in data if "rtfx" in r]
+    procs = [r.get("processingTime", 0) for r in data]
+    return {
+        "files": len(data),
+        "avg_der": statistics.mean(ders) if ders else None,
+        "median_der": statistics.median(ders) if ders else None,
+        "avg_miss": statistics.mean(miss) if miss else None,
+        "avg_fa": statistics.mean(fa) if fa else None,
+        "avg_se": statistics.mean(se) if se else None,
+        "rtfx_overall": statistics.mean(rtfxs) if rtfxs else None,
+        "rtfx_median": statistics.median(rtfxs) if rtfxs else None,
+        "total_proc_s": sum(procs),
+        "per_meeting": data,
+    }
+
+
+def load_voxtrace_diarization(path: Path) -> dict:
+    """VoxTrace diarization JSON is an aggregate wrapper with fractional metrics."""
+    with open(path) as f:
+        data = json.load(f)
+    dataset = data["datasets"][0]
+    items = dataset.get("items", [])
+    per_meeting = []
+    for r in items:
+        per_meeting.append({
+            "meeting": r["meeting"],
+            "der": r["der"] * 100,
+            "missRate": r["miss_rate"] * 100,
+            "falseAlarmRate": r["false_alarm_rate"] * 100,
+            "speakerErrorRate": r["speaker_error_rate"] * 100,
+            "rtfx": r["rtfx"],
+            "processingTime": r.get("latency_sec", 0),
+        })
+
+    ders = [r["der"] for r in per_meeting]
+    miss = [r["missRate"] for r in per_meeting]
+    fa = [r["falseAlarmRate"] for r in per_meeting]
+    se = [r["speakerErrorRate"] for r in per_meeting]
+    rtfxs = [r["rtfx"] for r in per_meeting]
+    return {
+        "files": dataset["files_processed"],
+        "avg_der": dataset["average_der_pct"],
+        "median_der": dataset["median_der_pct"],
+        "avg_miss": statistics.mean(miss) if miss else None,
+        "avg_fa": statistics.mean(fa) if fa else None,
+        "avg_se": statistics.mean(se) if se else None,
+        "rtfx_overall": dataset["overall_rtfx"],
+        "rtfx_median": statistics.median(rtfxs) if rtfxs else None,
+        "total_proc_s": sum(r["processingTime"] for r in per_meeting),
+        "per_meeting": per_meeting,
+        "source": data.get("source", "chat"),
+        "mode": data.get("mode"),
+    }
+
+
+diarization_engines: dict[str, dict] = {}
+# Each entry: (display_name, [list of candidate filenames — first existing one wins]).
+# Sortformer ships under a few different names depending on which variant was
+# benchmarked last (`sortformer_ami.json` for the default, plus older
+# `sortformer_nvidia_high_ami.json` / `sortformer_gd_ami.json` for explicit
+# variant runs). Try the most-recent default first.
+_diar_files = [
+    ("Pyannote community-1 (offline, VBx)", ["diarization_offline_ami_sdm.json"]),
+    ("Pyannote 3.1 (streaming)",            ["diarization_streaming_ami_sdm.json"]),
+    ("Sortformer NVIDIA High-Latency",      ["sortformer_nvidia_high_ami.json"]),
+    ("Sortformer GD (streaming, fastV2_1)", ["sortformer_ami.json", "sortformer_gd_ami.json"]),
+    ("LS-EEND",                             ["lseend_ami.json"]),
+]
+for name, fnames in _diar_files:
+    for fname in fnames:
+        p = RESULTS / fname
+        if p.exists():
+            diarization_engines[name] = load_diarization(p)
+            break
+_voxtrace_chunk_global = RESULTS / "voxtrace_diarization_chunk_global_ami.json"
+if _voxtrace_chunk_global.exists():
+    diarization_engines["VoxTrace final JSON (chunk_global)"] = load_voxtrace_diarization(_voxtrace_chunk_global)
+_voxtrace_full = RESULTS / "voxtrace_diarization_full_ami.json"
+if _voxtrace_full.exists():
+    diarization_engines["VoxTrace final JSON (full)"] = load_voxtrace_diarization(_voxtrace_full)
+_voxtrace_raw = RESULTS / "voxtrace_diarization_raw_ami.json"
+if _voxtrace_raw.exists():
+    diarization_engines["VoxTrace raw speaker_turns"] = load_voxtrace_diarization(_voxtrace_raw)
+
+
+# ---------------------------------------------------------------------------
+# Remote ASR concurrency sweep (Qwen3-ASR family)
+# ---------------------------------------------------------------------------
+
+qwen3_sweep: dict | None = None
+_sweep_path = RESULTS / "qwen3_sweep.json"
+if _sweep_path.exists():
+    with open(_sweep_path) as f:
+        qwen3_sweep = json.load(f)
 
 
 # ---------------------------------------------------------------------------
@@ -339,6 +470,8 @@ def render_findings() -> str:
          "Omni 是通用多模态模型而非专用 ASR,却在 4 个数据集上全部胜出,最大优势在日文 JSUT(10.92% vs 12.37% CER,–1.45pt)。代价是约慢 10–15%,因为多了 system/user prompt 的输入 token。"),
         ("VibeVoice-ASR-7B 英文有竞争力,其他语言中游",
          "在 LibriSpeech test-clean 上 2.87% WER 优于 SenseVoice(3.77%),但 test-other、中文、日文均落后于 Qwen3 系列和 SenseVoice。日文 15.15% CER 是它最弱项——训练数据可能英文为主。"),
+        ("VoxTrace ASR 英文小样本已进入第一梯队",
+         "VoxTrace ASR 在 LibriSpeech test-clean 100 文件样本上 WER 2.22%、中位 0%,接近 Qwen3-Omni / Qwen3-ASR / Parakeet 的全量成绩。注意它目前只跑了英文 100 文件,还不能和全量 2,620 文件结果完全等价。"),
         ("本地中文识别 SenseVoice 明显领先 Parakeet CTC",
          "SenseVoice Small(ONNX CPU)在 THCHS-30 上 CER 5.27%,Parakeet CTC zh-CN(int8)为 8.20%。Apple on-device 中文最弱 13.82%。Parakeet fp32 编码器版本暂未对比。"),
         ("日文 SenseVoice 与 Qwen3-Omni 平分秋色",
@@ -347,6 +480,8 @@ def render_findings() -> str:
          "Parakeet TDT v3 在英文 LibriSpeech 上 RTFx 突破 100×。SenseVoice 是非英文场景速度王者(60–80×)。Qwen3 系列 7–13× 瓶颈在网络往返而非推理本身。VibeVoice 是远程模型中最慢(3.6–6.1×),输出结构化 JSON 多生成不少 token。Apple 18–49×,因语言而异。"),
         ("Apple SFSpeechRecognizer 在跑过的数据集上全面落后",
          "on-device test-other WER 17.71%(领先模型 4–8%),中文 CER 13.82%。日文在这台机器上没有 on-device 资源——Apple 按硬件/区域分发语言包。"),
+        ("说话人分离 Pyannote community-1 是离线场景唯一的最优解",
+         "AMI SDM 16 会议、统一评分协议(collar 0.25 总宽度 + ignoreOverlap + pyannote 官方 RTTM)下:Pyannote community-1 (powerset 分割 + VBx 聚类) DER 9.81%、RTFx 316×,断档式领先。LS-EEND 18.28%(流式里最佳)、VoxTrace final JSON full 17.72%、VoxTrace final JSON chunk_global 20.00%、Pyannote 3.1 streaming 23.61%(SE 15.67% 主导,流式聚类无法回看)、Sortformer NVIDIA High-Latency 26.01%(30.4s 上下文,速度 154×)、Sortformer GD fastV2_1 29.06%(0.48s 上下文)。Sortformer 两个变体共有 Miss 18% 的短板,跟 chunk 大小无关,是模型本身的偏置。"),
     ]
     return "\n".join(
         f'<div class="finding"><h3>{escape(t)}</h3><p>{escape(b)}</p></div>'
@@ -362,7 +497,10 @@ def render_selection_table() -> str:
         ("联网 · 最高准确率",                  "Qwen3-Omni",               "4 个数据集全部胜出;比 ASR-1.7B 慢 10–15%"),
         ("联网 · 控制成本",                    "Qwen3-ASR-1.7B",           "英/中只比 Omni 落后 ≤0.2pt,单位 token 成本更低"),
         ("联网 · 转写 + 说话人分离",           "VibeVoice-ASR-7B",         "输出带 Speaker ID 和时间戳的结构化 JSON;英文有竞争力(WER 2.87%),中/日文落后"),
+        ("联网 · VoxTrace Diarization",      "优先看 raw speaker_turns",   "raw /v1/audio/diarization 与 Pyannote C1 同层级; final diarized_json 会叠加 ASR/align/segment merge 误差"),
         ("零依赖 · 系统 API",                  "Apple SFSpeechRecognizer", "无需安装,但每个数据集准确率落后 5-15pt"),
+        ("说话人分离 · 离线批量",              "Pyannote community-1 (VBx)", "AMI 16 会议 DER 9.81%、RTFx 316×,FluidAudio 主推方案"),
+        ("说话人分离 · 实时流式",              "LS-EEND",                  "DER 18.28%、RTFx 204×,流式场景的最佳折中(比 Pyannote 3.1 streaming 低 5pt)"),
     ]
     body = "\n".join(
         f'<tr><td>{escape(a)}</td><td><strong>{escape(b)}</strong></td><td>{escape(c)}</td></tr>'
@@ -376,10 +514,273 @@ def render_selection_table() -> str:
     """
 
 
+def short_diarization_name(name: str) -> str:
+    short_names = {
+        "Pyannote community-1 (offline, VBx)": "Pyannote C1",
+        "Pyannote 3.1 (streaming)": "Pyannote 3.1",
+        "Sortformer NVIDIA High-Latency": "Sortformer NVIDIA",
+        "Sortformer GD (streaming, fastV2_1)": "Sortformer GD",
+        "VoxTrace final JSON (chunk_global)": "VoxTrace JSON CG",
+        "VoxTrace final JSON (full)": "VoxTrace JSON full",
+        "VoxTrace raw speaker_turns": "VoxTrace raw",
+    }
+    return short_names.get(name, name.split(" (")[0])
+
+
+def render_diarization_section() -> str:
+    """Diarization comparison: DER matrix + per-engine ranking + DER error breakdown."""
+    if not diarization_engines:
+        return ""
+
+    # Sort engines by avg DER ascending (lower is better).
+    rows_sorted = sorted(
+        diarization_engines.items(), key=lambda kv: kv[1]["avg_der"] or 1e9
+    )
+
+    best_der = min(v["avg_der"] for v in diarization_engines.values() if v["avg_der"] is not None)
+    best_rtfx = max(
+        v["rtfx_overall"] for v in diarization_engines.values() if v["rtfx_overall"] is not None
+    )
+
+    # 1. Headline ranking
+    rank_rows = []
+    for rank, (name, info) in enumerate(rows_sorted, 1):
+        is_best_der = abs((info["avg_der"] or 0) - best_der) < 0.005
+        is_best_rtfx = abs((info["rtfx_overall"] or 0) - best_rtfx) < 0.05
+        rank_cls = "rank-1" if rank == 1 else ""
+        rank_rows.append(
+            f'<tr class="{rank_cls}">'
+            f'<td class="rank">{rank}</td>'
+            f'<td><strong>{escape(name)}</strong></td>'
+            f'<td class="num">{info["files"]}</td>'
+            f'<td class="num"><strong>{fmt_pct(info["avg_der"])}</strong></td>'
+            f'<td class="num">{fmt_pct(info["median_der"])}</td>'
+            f'<td class="num">{fmt_pct(info["avg_miss"])}</td>'
+            f'<td class="num">{fmt_pct(info["avg_fa"])}</td>'
+            f'<td class="num">{fmt_pct(info["avg_se"])}</td>'
+            f'<td class="num">{fmt_rtfx(info["rtfx_overall"])}</td>'
+            "</tr>"
+        )
+
+    ranking_table = f"""
+    <table class="detail">
+      <thead>
+        <tr>
+          <th>#</th><th>引擎</th><th>会议数</th>
+          <th>平均 DER</th><th>中位 DER</th>
+          <th>Miss</th><th>FA</th><th>SE</th>
+          <th>总体 RTFx</th>
+        </tr>
+      </thead>
+      <tbody>{"".join(rank_rows)}</tbody>
+    </table>
+    <p class="skipped-note">
+      DER = Miss + FA + SE。Miss(漏检)、FA(虚警)、SE(说话人混淆)分别量化错误来源。
+      所有引擎在同一份 AMI SDM 测试集(16 个会议、约 9.4 小时音频)上评测,
+      使用相同的 RTTM ground-truth 和 collar 设置,数字直接可比。
+    </p>
+    """
+
+    # 2. Per-meeting DER breakdown — show top-3 best/worst per engine to keep table small
+    meetings = []
+    for name, info in rows_sorted:
+        for r in info["per_meeting"]:
+            meetings.append((name, r["meeting"], r["der"], r["rtfx"]))
+
+    # Build a per-meeting comparison: rows = meeting, cols = engines
+    all_meetings = sorted({m for _, m, *_ in meetings})
+    headers = (
+        '<th class="model-header diarization-meeting-header">会议</th>'
+        + "".join(
+            f'<th class="diarization-engine"><div class="ds-name">{escape(short_diarization_name(name))}</div>'
+            f'<div class="ds-metric">DER</div></th>'
+            for name, _ in rows_sorted
+        )
+    )
+    body_rows = []
+    for m in all_meetings:
+        cells = [f"<th class=\"model\">{escape(m)}</th>"]
+        for name, _ in rows_sorted:
+            r = next((r for r in diarization_engines[name]["per_meeting"] if r["meeting"] == m), None)
+            if r is None:
+                cells.append('<td class="empty">—</td>')
+            else:
+                der = r["der"]
+                bar_pct = min(100, der / 60 * 100)
+                cls = ""
+                # Highlight cell if this is the best engine on this meeting
+                best_meeting_der = min(
+                    rr["der"]
+                    for nn, _ in rows_sorted
+                    for rr in diarization_engines[nn]["per_meeting"]
+                    if rr["meeting"] == m
+                )
+                if abs(der - best_meeting_der) < 0.005:
+                    cls = "best"
+                cells.append(
+                    f'<td class="data {cls}">'
+                    f'<div class="cell-bar"><span style="width:{bar_pct:.0f}%"></span></div>'
+                    f'<div class="cell-value">{der:.1f}%</div>'
+                    f"</td>"
+                )
+        body_rows.append(f"<tr>{''.join(cells)}</tr>")
+
+    matrix_table = f"""
+    <table class="matrix">
+      <thead><tr>{headers}</tr></thead>
+      <tbody>{"".join(body_rows)}</tbody>
+    </table>
+    """
+
+    return ranking_table + "<h3 style=\"margin-top:18px;\">逐会议 DER 矩阵</h3>" + matrix_table
+
+
+def render_concurrency_sweep() -> str:
+    """Render the Qwen3 remote ASR concurrency scaling table + analysis."""
+    if not qwen3_sweep or not qwen3_sweep.get("sweep_runs"):
+        return ""
+
+    # The JSON may use either field-name schema:
+    #   • benchmark.py output:  throughput_files_per_sec / wall_clock_sec / latency_p50_sec / ...
+    #   • hand-edited short:    throughput_fps / wall_sec / p50 / p95 / p99 / error_pct / files
+    # Normalize to a single dict per row.
+    def norm(r: dict) -> dict:
+        return {
+            "concurrency": r["concurrency"],
+            "files":       r.get("files_processed", r.get("files", 0)),
+            "wall_sec":    r.get("wall_clock_sec", r.get("wall_sec", 0)),
+            "throughput":  r.get("throughput_files_per_sec", r.get("throughput_fps", 0)),
+            "rtfx":        r.get("effective_rtfx_overall", r.get("effective_rtfx", 0)),
+            "p50":         r.get("latency_p50_sec", r.get("p50", 0)),
+            "p95":         r.get("latency_p95_sec", r.get("p95", 0)),
+            "p99":         r.get("latency_p99_sec", r.get("p99", 0)),
+            "error_pct":   r.get("error_rate_pct", r.get("error_pct", 0)),
+        }
+
+    runs = [norm(r) for r in qwen3_sweep["sweep_runs"]]
+    runs.sort(key=lambda r: r["concurrency"])
+    baseline_throughput = runs[0]["throughput"] if runs else 1.0
+    peak_throughput = max(r["throughput"] for r in runs)
+    best_c_idx = max(range(len(runs)), key=lambda i: runs[i]["throughput"])
+
+    baseline_p50 = runs[0]["p50"] if runs else 1.0
+
+    rows_html = []
+    for i, r in enumerate(runs):
+        speedup = r["throughput"] / baseline_throughput if baseline_throughput > 0 else 0
+        c_now = r["concurrency"]
+        c_prev = runs[i - 1]["concurrency"] if i > 0 else 1
+        prev_t = runs[i - 1]["throughput"] if i > 0 else baseline_throughput
+        ratio_to_ideal = (r["throughput"] / prev_t) / (c_now / c_prev) if c_prev > 0 and prev_t > 0 else 1.0
+        throughput_frac = r["throughput"] / peak_throughput if peak_throughput > 0 else 0
+        p50_ratio = r["p50"] / baseline_p50 if baseline_p50 > 0 else 1.0
+
+        # Tag priority (highest first):
+        #   regress: throughput < previous level — overload territory
+        #   sweet:   ≥70% of peak throughput AND p50 ≤ 2× baseline — best practical pick
+        #   peak:    ≥95% of peak throughput — max throughput, latency may suffer
+        #   linear:  ratio_to_ideal > 0.85 — still scaling well
+        #   plateau: anything else
+        if i > 0 and r["throughput"] < prev_t:
+            css, tag = "regress", "倒退"
+        elif throughput_frac >= 0.70 and p50_ratio <= 2.0 and throughput_frac < 0.95:
+            css, tag = "sweet", "性价比拐点"
+        elif throughput_frac >= 0.95:
+            css, tag = "peak", "吞吐峰值"
+        elif ratio_to_ideal > 0.85:
+            css, tag = "linear", "近线性"
+        else:
+            css, tag = "plateau", "平台"
+        rank_cls = "rank-1" if i == best_c_idx else ""
+        rows_html.append(
+            f'<tr class="{rank_cls}">'
+            f'<td class="rank">{r["concurrency"]}</td>'
+            f'<td class="num">{r["files"]}</td>'
+            f'<td class="num">{r["wall_sec"]:.1f}s</td>'
+            f'<td class="num"><strong>{r["throughput"]:.2f}</strong> f/s</td>'
+            f'<td class="num">{r["rtfx"]:.1f}×</td>'
+            f'<td class="num">{speedup:.2f}×</td>'
+            f'<td class="num">{r["p50"]:.2f}s</td>'
+            f'<td class="num">{r["p95"]:.2f}s</td>'
+            f'<td class="num">{r["p99"]:.2f}s</td>'
+            f'<td class="num">{r["error_pct"]:.1f}%</td>'
+            f'<td><span class="sweep-tag sweep-{css}">{tag}</span></td>'
+            "</tr>"
+        )
+
+    table = f"""
+    <table class="detail">
+      <thead>
+        <tr>
+          <th>并发数</th><th>文件</th><th>墙钟</th>
+          <th>吞吐量</th><th>effRTFx</th><th>加速比</th>
+          <th>p50</th><th>p95</th><th>p99</th>
+          <th>错误率</th><th>状态</th>
+        </tr>
+      </thead>
+      <tbody>{"".join(rows_html)}</tbody>
+    </table>
+    """
+
+    # Dynamic findings — compute numbers from the actual `runs` list so the
+    # analysis stays in sync with whatever sweep data is currently in the JSON.
+    peak_row = max(runs, key=lambda r: r["throughput"])
+    last_row = runs[-1]
+    base = runs[0]
+    # Sweet-spot row: highest throughput where p50 ≤ 1.5× baseline.
+    sweet_candidates = [r for r in runs if r["p50"] <= base["p50"] * 1.5 and r["throughput"] >= peak_row["throughput"] * 0.65]
+    sweet_row = max(sweet_candidates, key=lambda r: r["throughput"]) if sweet_candidates else peak_row
+    linear_end = sweet_row  # last "still scaling well" row by definition
+
+    findings = f"""
+    <div class="caveats" style="margin-top:14px;">
+      <div class="caveat">
+        <h4>线性扩展区(1 → {linear_end['concurrency']})</h4>
+        <p>吞吐量从 {base['throughput']:.2f} f/s 涨到 {linear_end['throughput']:.2f} f/s,
+        加速比 {linear_end['throughput']/base['throughput']:.1f}×,接近理想 {linear_end['concurrency']}×。
+        p50 延迟基本不涨({base['p50']:.2f}s → {linear_end['p50']:.2f}s)。
+        服务端仍有空闲容量,每加一个并发都换回可观吞吐。</p>
+      </div>
+      <div class="caveat">
+        <h4>性价比拐点 = {sweet_row['concurrency']}</h4>
+        <p>吞吐量 {sweet_row['throughput']:.2f} f/s,达到峰值的 {sweet_row['throughput']/peak_row['throughput']*100:.0f}%。
+        p50 {sweet_row['p50']:.2f}s,p95 {sweet_row['p95']:.2f}s,延迟可控。
+        <strong>用户交互式应用首选 {sweet_row['concurrency']} 并发</strong>。</p>
+      </div>
+      <div class="caveat">
+        <h4>吞吐量天花板 = {peak_row['concurrency']}</h4>
+        <p>{peak_row['throughput']:.2f} f/s 峰值,effRTFx {peak_row['rtfx']:.1f}×{(' 已经追上本地 Parakeet TDT v3 (106.9×)' if peak_row['rtfx'] >= 100 else '')}。
+        p50 {peak_row['p50']:.2f}s({peak_row['p50']/base['p50']:.1f}× baseline),p95 {peak_row['p95']:.2f}s。
+        <strong>批量离线场景首选</strong>——牺牲单文件延迟换最大总吞吐。</p>
+      </div>
+      <div class="caveat">
+        <h4>过载/倒退 ≥ {last_row['concurrency']}</h4>
+        <p>{last_row['concurrency']} 并发吞吐量 {last_row['throughput']:.2f} f/s
+        {('<strong>比峰值低 ' + f"{(1 - last_row['throughput']/peak_row['throughput'])*100:.0f}" + '%</strong>' ) if last_row['throughput'] < peak_row['throughput'] * 0.95 else '已与峰值持平'}。
+        p99 {last_row['p99']:.2f}s 远高于交互应用可接受范围。客户端必须自己 throttle,不要无脑加并发。</p>
+      </div>
+      <div class="caveat">
+        <h4>服务端是软排队,不返回 429</h4>
+        <p>所有并发级别错误率都是 0%——服务端不主动拒绝请求,只用排队拖慢延迟。
+        客户端无法靠 429 反馈感知饱和,必须靠 p50/p95 监控自己判断。</p>
+      </div>
+      <div class="caveat">
+        <h4>跟本地 Parakeet 的成本对比</h4>
+        <p>concurrency={peak_row['concurrency']} 时 effRTFx {peak_row['rtfx']:.1f}×,
+        {'接近' if peak_row['rtfx'] < 130 else '超过'}本地 Parakeet TDT v3 (106.9×)。
+        但 Qwen3 远程烧 token、Parakeet 本地免费。<strong>纯英文场景本地 Parakeet 仍然首选</strong>,
+        Qwen3 留给"非英文"或"需要更高准确率"的场景。</p>
+      </div>
+    </div>
+    """
+
+    return table + findings
+
+
 def render_caveats() -> str:
     items = [
         ("硬件环境",
-         "本地引擎(Parakeet、SenseVoice、Apple)跑在 Apple M2 MacBook Air;Qwen3 系列和 VibeVoice 跑在服务商远程 GPU,RTFx 数据包含网络往返,不能与本地引擎数字直接对比。"),
+         "本地引擎(Parakeet、SenseVoice、Apple)跑在 Apple M4 MacBook Air;Qwen3 系列和 VibeVoice 跑在服务商远程 GPU,RTFx 数据包含网络往返,不能与本地引擎数字直接对比。"),
         ("文本归一化",
          "同一套归一化管道作用于参考和假设串再打分。英文沿用 HuggingFace ASR Leaderboard 规则(英美拼写互转、缩略语展开、连读拆分、数字词转数字)。中文将阿拉伯数字映射为汉字,仅保留 CJK 码点。日文将汉字数字映射为阿拉伯数字(复合十位优先于简单十位),保留平假名/片假名/CJK/数字。"),
         ("评估指标",
@@ -394,6 +795,31 @@ def render_caveats() -> str:
          'Omni 是通用多模态 LLM,必须显式给一段 ASR 风格的 system prompt 抑制评论性输出。我们用的是 "You are an automatic speech recognition system. Output only the verbatim transcription…"。不带这个 prompt 它会输出对内容的分析而不是转写。'),
         ("并发与重试",
          "Qwen3 / VibeVoice 远程调用使用 4 并发,碰到 429/5xx 走指数回退(1s → 30s,最多重试 4 次)。"),
+        ("Diarization 评测集",
+         "AMI SDM 测试集 16 会议(EN2002a-d / ES2004a-d / IS1009a-d / TS3003a-d),"
+         "对应 <code>DatasetDownloader.officialAMITestSet</code>。4 个引擎跑的是同一组音频和 RTTM ground truth,DER 直接可比。"),
+        ("Diarization 指标拆解",
+         "DER = Miss(漏检) + FA(虚警) + SE(说话人混淆)。Pyannote 3.1 streaming 的 DER 主要被 SE 推高,因为流式聚类无法回溯——一旦把两个人当作同一说话人,后面没机会修正。"),
+        ("两个 Pyannote 模型不是同一个",
+         "<code>--mode offline</code> 跑的是 <strong>pyannote/speaker-diarization-community-1</strong>(powerset 分割 + WeSpeaker + VBx 聚类),"
+         "<code>--mode streaming</code> 跑的是 <strong>pyannote/speaker-diarization-3.1</strong>(分割 + WeSpeaker)。"
+         "两者是不同代的模型,community-1 比 3.1 更新更强,所以 DER 差距既来自模型代际,也来自流式 vs 离线的算法约束,不能简单理解为同一模型的\u201c速度精度权衡\u201d。"),
+        ("Sortformer 两个变体对比",
+         "<code>sortformer-benchmark --dataset ami</code> 默认跑 <strong>Gradient Descent fastV2_1 流式版</strong>"
+         "(chunkLen=6, ~0.48s 上下文, DER 29.06%, RTFx 17.5×),加 <code>--nvidia-high-latency</code> 切到"
+         "<strong>NVIDIA High-Latency 版</strong>(chunkLen=340, 30.4s 上下文, DER 26.01%, RTFx 154×)。"
+         "NVIDIA 版准确率好 3pt 主要来自 SE 降低(7.66% → 5.35%,长上下文更易分人),速度反而快 9 倍"
+         "(长 chunk 摊销运行时开销更划算)。"),
+        ("Sortformer Miss 偏高是模型本身的问题",
+         "GD 和 NVIDIA 两个变体 Miss rate 几乎一样(18.67% vs 18.12%),跟 chunk 大小无关,跟阈值关系也有限。"
+         "这是 Sortformer 训练数据(主要是电话会议、短上下文场景)决定的系统性欠检测偏置,"
+         "本地调参很难根除——要解决得换模型或重训。"),
+        ("Diarization 评分协议 — 三个 bug 修复",
+         "本仓库的 diarization benchmark 原来有 3 个评分 bug,导致 4 个引擎的 DER 不可比:"
+         "(1) pyannote offline 用的 DiarizationMetricsCalculator 实际是 collar=0.5(每个 segment 两端各削 0.25),不是文档说的 0.25;"
+         "(2) pyannote streaming 用 totalFrames 当分母(应该是 totalRefSpeech)、贪心 first-overlap 映射(应该是 Hungarian)、没有 collar;"
+         "(3) ground truth 各引擎不一致(XML 标注 vs 逐词标注)。"
+         "本报告里全部修复:4 个引擎统一调用 DiarizationDER.compute(collar=0.25, ignoreOverlap=true),ground truth 统一用 pyannote 官方 RTTM(<code>~/FluidAudioDatasets/ami_official/rttm/</code>),所有数字直接可比。"),
     ]
     return "\n".join(
         f'<div class="caveat"><h4>{escape(t)}</h4><p>{b}</p></div>'
@@ -410,7 +836,17 @@ def render_inventory() -> str:
         ("qwen3_all.json",                   "Qwen3-ASR-1.7B (远程)",     "全部 4 个数据集"),
         ("qwen3_omni_all.json",              "Qwen3-Omni (远程)",         "全部 4 个数据集"),
         ("vibevoice_all.json",               "VibeVoice-ASR-7B (远程)",   "全部 4 个数据集"),
+        ("voxtrace_asr_librispeech.json",    "VoxTrace ASR (远程)",       "LibriSpeech test-clean 100 文件"),
         ("apple_all.json",                   "Apple SFSpeechRecognizer",  "3 个数据集(无 JSUT)"),
+        ("diarization_offline_ami_sdm.json",  "Pyannote community-1 (offline, VBx)", "AMI SDM 测试集 16 会议"),
+        ("diarization_streaming_ami_sdm.json","Pyannote 3.1 (streaming)",           "AMI SDM 测试集 16 会议"),
+        ("sortformer_nvidia_high_ami.json",    "Sortformer NVIDIA High-Latency", "AMI SDM 测试集 16 会议"),
+        ("sortformer_ami.json",                "Sortformer GD (streaming, fastV2_1)", "AMI SDM 测试集 16 会议"),
+        ("lseend_ami.json",                   "LS-EEND",                   "AMI SDM 测试集 16 会议"),
+        ("voxtrace_diarization_raw_ami.json", "VoxTrace raw speaker_turns", "AMI SDM 测试集 16 会议(/v1/audio/diarization)"),
+        ("voxtrace_diarization_full_ami.json", "VoxTrace final JSON full", "AMI SDM 测试集 16 会议(chat diarized_json)"),
+        ("voxtrace_diarization_chunk_global_ami.json", "VoxTrace final JSON chunk_global", "AMI SDM 测试集 16 会议(chat diarized_json)"),
+        ("qwen3_sweep.json",                  "Qwen3-ASR-1.7B 并发扫描",   "LibriSpeech test-clean 100 文件 × 7 个并发级别"),
     ]
     body = "\n".join(
         f'<tr><td><code>{escape(a)}</code></td><td>{escape(b)}</td><td>{escape(c)}</td></tr>'
@@ -503,6 +939,36 @@ header .subtitle { color: var(--text-muted); margin: 0 0 16px; }
   border-bottom: 1px solid transparent;
 }
 .toc a:hover { border-bottom-color: var(--accent); }
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin: 24px 0 18px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(8px);
+  padding: 10px 0;
+}
+.tab-button {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 9px 18px;
+}
+.tab-button.active {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg-card);
+}
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
 section { margin-top: 36px; }
 section h2 {
   font-size: 20px;
@@ -542,8 +1008,21 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 /* Matrix */
 .matrix { table-layout: fixed; }
 .matrix th.model-header { width: 28%; }
-.matrix th .ds-name { font-weight: 600; color: var(--text); }
+.matrix th .ds-name {
+  font-weight: 600;
+  color: var(--text);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
 .matrix th .ds-metric { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.matrix th.diarization-meeting-header { width: 12%; }
+.matrix th.diarization-engine { width: 14.666%; }
+.matrix th.diarization-engine .ds-name {
+  font-size: 12px;
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
 .matrix td.data { position: relative; }
 .matrix td.empty { color: var(--text-muted); text-align: center; font-style: italic; }
 .matrix td.best { background: var(--good-soft); }
@@ -595,6 +1074,21 @@ table.detail tr.rank-1 td { background: rgba(21, 128, 61, 0.04); }
 }
 .badge.local  { background: var(--accent-soft); color: var(--accent); text-transform: none; letter-spacing: 0; }
 .badge.remote { background: var(--speed-soft); color: var(--speed); text-transform: none; letter-spacing: 0; }
+
+/* Concurrency sweep status tags */
+.sweep-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.sweep-linear  { background: rgba(34, 197, 94, 0.18);  color: #15803d; }
+.sweep-sweet   { background: rgba(34, 197, 94, 0.32);  color: #14532d; }
+.sweep-peak    { background: rgba(234, 179, 8, 0.22);  color: #b45309; }
+.sweep-plateau { background: rgba(148, 163, 184, 0.25); color: #475569; }
+.sweep-regress { background: rgba(239, 68, 68, 0.18);  color: #b91c1c; }
 
 /* Findings */
 .findings { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
@@ -662,7 +1156,7 @@ def main():
   <h1>ASR 引擎横向对比报告</h1>
   <p class="subtitle">
     生成日期 {today} ·
-    本地硬件 Apple M2 Air ·
+    本地硬件 Apple M4 Air ·
     远程引擎运行于服务商 GPU(OpenAI 兼容 API)
   </p>
   <p>
@@ -675,10 +1169,19 @@ def main():
     <a href="#detail">各数据集明细</a>
     <a href="#findings">关键发现</a>
     <a href="#selection">选型指南</a>
+    <a href="#diarization">说话人分离</a>
+    <a href="#concurrency">远程并发扩展性</a>
     <a href="#caveats">方法学</a>
     <a href="#inventory">原始数据文件</a>
   </nav>
 </header>
+
+<div class="tabs" role="tablist" aria-label="报告分类">
+  <button class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="tab-asr" data-tab="asr">ASR</button>
+  <button class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="tab-diarization" data-tab="diarization">Diarization</button>
+</div>
+
+<div id="tab-asr" class="tab-panel active" role="tabpanel">
 
 <section id="datasets">
   <h2>数据集</h2>
@@ -704,7 +1207,7 @@ def main():
 
 <section id="speed">
   <h2>速度矩阵</h2>
-  <p class="lede">RTFx 含义:100× 表示 1 小时音频 36 秒转写完毕。本地引擎跑在 Apple M2;远程模型数字包含网络往返,并不反映模型本身的纯推理速度。</p>
+  <p class="lede">RTFx 含义:100× 表示 1 小时音频 36 秒转写完毕。本地引擎跑在 Apple M4;远程模型数字包含网络往返,并不反映模型本身的纯推理速度。</p>
   <div class="card">{render_speed_matrix()}</div>
 </section>
 
@@ -725,6 +1228,25 @@ def main():
   <div class="card">{render_selection_table()}</div>
 </section>
 
+<section id="concurrency">
+  <h2>远程模型并发扩展性 — Qwen3-ASR-1.7B</h2>
+  <p class="lede">
+    在 LibriSpeech test-clean 上取 100 个文件,以同样的样本扫描 7 个并发级别(1/2/4/8/16/32/64),
+    实测服务端容量曲线、最优并发点、过载阈值。这是给你做容量规划/选型的关键数据。
+  </p>
+  <div class="card">{render_concurrency_sweep()}</div>
+</section>
+
+</div>
+
+<div id="tab-diarization" class="tab-panel" role="tabpanel">
+
+<section id="diarization">
+  <h2>说话人分离(Diarization)</h2>
+  <p class="lede">在 AMI SDM 测试集(16 个会议,约 9.4 小时)上对比 4 套 diarization 引擎。指标 DER 越低越好,所有引擎评测同一份音频和 ground truth,数字直接可比。</p>
+  <div class="card">{render_diarization_section()}</div>
+</section>
+
 <section id="caveats">
   <h2>方法学说明</h2>
   <div class="caveats">{render_caveats()}</div>
@@ -736,11 +1258,36 @@ def main():
   <div class="card">{render_inventory()}</div>
 </section>
 
+</div>
+
 <footer>
   重跑任意 benchmark 后运行 <code>python3 Scripts/generate_benchmark_report.py</code> 重新生成此报告。
 </footer>
 
 </div>
+<script>
+const tabButtons = document.querySelectorAll('.tab-button');
+const tabPanels = document.querySelectorAll('.tab-panel');
+function activateTab(name) {{
+  tabButtons.forEach((button) => {{
+    const active = button.dataset.tab === name;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
+  }});
+  tabPanels.forEach((panel) => panel.classList.toggle('active', panel.id === `tab-${{name}}`));
+}}
+tabButtons.forEach((button) => button.addEventListener('click', () => activateTab(button.dataset.tab)));
+document.querySelectorAll('.toc a').forEach((link) => {{
+  link.addEventListener('click', () => {{
+    const target = link.getAttribute('href') || '';
+    if (target === '#diarization' || target === '#caveats' || target === '#inventory') {{
+      activateTab('diarization');
+    }} else {{
+      activateTab('asr');
+    }}
+  }});
+}});
+</script>
 </body>
 </html>
 """

@@ -10,6 +10,10 @@ benchmark_results/
 ├── parakeet_ja_jsut.json              # ja-benchmark --dataset jsut
 ├── sensevoice_all.json                # SenseVoiceBenchmark/benchmark.py
 ├── qwen3_all.json                     # Qwen3RemoteBenchmark/benchmark.py
+├── voxtrace_asr_all.json              # VoxTraceBenchmark/benchmark.py --task asr
+├── voxtrace_diarization_raw_ami.json  # VoxTraceBenchmark/benchmark.py --task diarization --dataset ami
+├── voxtrace_diarization_full_ami.json # VoxTraceBenchmark/benchmark.py --task diarization --diarization-source chat --mode full
+├── voxtrace_diarization_chunk_global_ami.json # VoxTraceBenchmark/benchmark.py --task diarization --diarization-source chat --mode chunk_global
 └── apple_all.json                     # AppleSpeechBenchmark
 ```
 
@@ -423,3 +427,61 @@ python benchmark.py --output benchmark_results/vibevoice_all.json
 - **Cost**: every file is a billable streaming chat-completion call, with `max_tokens=32768` allocated. If your provider charges by max-tokens reservation rather than emitted tokens, this could be expensive.
 - **Apples-to-apples scoring**: VibeVoice does diarization + transcription, but for ASR comparison we score only the concatenated transcript. Diarization quality is **not** evaluated here.
 - **Text normalization** is identical to the other benchmarks (HF leaderboard English; digit-mapping Chinese; kanji-to-digit Japanese).
+
+---
+
+# VoxTrace ASR + Diarization (remote, OpenAI-compatible)
+
+## Configuration
+
+- Model: `arcships-asr-diarize` served behind an OpenAI-compatible `/v1/chat/completions` endpoint (non-streaming)
+- Default endpoint: `https://next-api.fazhipro.com/v1/chat/completions`
+- Request shape: base64 WAV `audio_url` plus a text block, matching the local `~/working/temp/voxtrace.py` call style
+- Raw diarization source: multipart `/v1/audio/diarization` returns `speaker_turns`; this is the apples-to-apples DER path for comparing pyannote boundaries
+- Final diarized JSON source: `/v1/chat/completions` returns transcript segments with `Start time`, `End time`, `Speaker ID`, and `Content`; use `--diarization-source chat --mode full|chunk_global` when you want to score the final user-facing output
+- ASR datasets: THCHS-30 (CER), JSUT-basic5000 (CER), LibriSpeech test-clean (WER), LibriSpeech test-other (WER)
+- Diarization datasets: AMI SDM by default; VoxConverse and CALLHOME are supported when local WAV + RTTM files exist under `~/FluidAudioDatasets/`
+- Location: `Examples/VoxTraceBenchmark/`
+
+## Setup
+
+```bash
+pip install -r Examples/VoxTraceBenchmark/requirements.txt
+export VOXTRACE_API_KEY=sk-...   # or pass via --api-key
+```
+
+## Running the Benchmark
+
+```bash
+cd Examples/VoxTraceBenchmark
+
+# ASR: all supported ASR datasets
+python benchmark.py --task asr
+
+# ASR: one dataset
+python benchmark.py --task asr --dataset librispeech --max-files 100
+
+# Diarization: raw speaker_turns from /v1/audio/diarization
+python benchmark.py --task diarization --dataset ami \
+  --diarization-api-url http://43.247.90.53:28211/v1/audio/diarization \
+  --api-key sk-...
+
+# Diarization: final diarized_json via chat API
+python benchmark.py --task diarization --dataset ami --diarization-source chat --mode full
+python benchmark.py --task diarization --dataset ami --diarization-source chat --mode chunk_global
+
+# Diarization: alternative local RTTM datasets
+python benchmark.py --task diarization --dataset voxconverse --max-files 20
+python benchmark.py --task diarization --dataset callhome --max-files 20
+
+# Save aggregate JSON
+python benchmark.py --task diarization --dataset ami --output benchmark_results/voxtrace_diarization_raw_ami.json
+```
+
+## Notes
+
+- **ASR scoring**: concatenates every parsed `Content` field before applying the same normalization and WER/CER helpers used by SenseVoice, Qwen3, and VibeVoice.
+- **DER scoring**: parses RTTM references, maps speakers globally by maximum frame overlap, and reports DER/Miss/FA/Speaker Error with a 0.25 s collar and overlap ignored by default.
+- **Raw vs final output**: raw `/v1/audio/diarization` scores pyannote speaker-turn boundaries only. `--diarization-source chat` scores final `diarized_json` transcript segments, so ASR, forced alignment, word speaker assignment, and segment merging can add Miss/FA/SE.
+- **Data locations**: ASR datasets reuse `~/Library/Application Support/FluidAudio/Datasets/`; diarization datasets reuse `~/FluidAudioDatasets/`.
+- **Concurrency default is 2** because remote long-audio diarization requests can be heavy.
