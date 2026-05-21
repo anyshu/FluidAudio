@@ -679,8 +679,7 @@ def run_parallel(items: list[Any], worker: Any, concurrency: int) -> tuple[list[
                     print(f"  [FAIL {len(failed)}] {res.get('audio') or res.get('meeting', '?')}: {res['error']}")
             else:
                 results.append(res)
-            if done <= 3 or done % 10 == 0 or done == total:
-                print(f"  [{done}/{total}] ok={len(results)} failed={len(failed)}")
+            print(f"  [{done}/{total}] ok={len(results)} failed={len(failed)}")
     return results, failed
 
 
